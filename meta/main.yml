@@ -1,0 +1,19 @@
+galaxy_info:
+  author: DevOpsGroup
+  company: DevOpsGroup s.r.o
+  description: Ansible role for installing Hashicorp Vault
+  
+  license: Apache-2.0
+  min_ansible_version: 2.15.6
+
+  role_name: hashicorp_vault
+  namespace: devopsgroup
+
+  galaxy_tags:
+    - hashicorp
+    - vault
+    - secrets
+
+  platforms: []
+
+dependencies: []

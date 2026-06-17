@@ -1,0 +1,61 @@
+- name: Create unseal directories
+  file:
+    path: "{{ unseal_keys_dir_output }}"
+    state: directory
+  delegate_to: localhost
+  become: false
+
+- name: Create root key directories
+  file:
+    path: "{{ root_token_dir_output }}"
+    state: directory
+  delegate_to: localhost
+  become: false
+
+- name: Initialise Vault operator
+  shell: vault operator init -key-shares=5 -key-threshold=3 -format json
+  environment:
+    VAULT_SKIP_VERIFY: "1"
+    VAULT_ADDR: "http://{{ vault_ips[inventory_hostname] }}:8200"
+  register: vault_init_results
+  failed_when: vault_init_results.rc == 1 
+  # An exit code of 0 means the Vault is not already initialized. 
+  # An exit code of 1 means an error occurred. 
+  # An exit code of 2 means the Vault is already initialized.
+
+- name: Parse output of vault init
+  set_fact:
+    vault_init_parsed: "{{ vault_init_results.stdout | from_json }}"
+  when: vault_init_results.rc == 0
+
+- name: Write unseal keys to files
+  copy:
+    dest: "{{ unseal_keys_dir_output }}/unseal_key_{{ item.0 }}"
+    content: "{{ item.1 }}"
+  with_indexed_items: "{{ vault_init_parsed.unseal_keys_hex }}"
+  delegate_to: localhost
+  become: false
+  when: vault_init_results.rc == 0
+
+- name: Write root token to file
+  copy:
+    content: "{{ vault_init_parsed.root_token }}"
+    dest: "{{ root_token_dir_output }}/rootkey"
+  delegate_to: localhost
+  become: false
+  when: vault_init_results.rc == 0
+
+- name: Reading unseal key contents
+  command: cat {{item}}
+  register: unseal_keys
+  with_fileglob: "{{ unseal_keys_dir_output }}/*"
+  delegate_to: localhost
+  become: false
+
+- name: Unseal vault with unseal keys
+  shell: |
+    vault operator unseal {{ item.stdout }}
+  environment:
+    VAULT_SKIP_VERIFY: "1"
+    VAULT_ADDR: "http://{{ vault_ips[inventory_hostname] }}:8200"
+  with_items: "{{ unseal_keys.results }}"

@@ -1,0 +1,42 @@
+- name: Copy CA certificate to the Vault server
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/certs/ca.crt"
+    dest: "/usr/local/share/ca-certificates/vault-temp-ca.crt"
+    mode: '0644'
+    force: yes
+
+- name: Update CA certificates on the system
+  ansible.builtin.shell: update-ca-certificates
+
+- name: Calculate retry_join addresses
+  set_fact:
+    retry_join_addresses: >-
+      {%- set results = [] -%}
+      {%- for host, vault_name in vault_instances.items() -%}
+        {%- if vault_ips[host] -%}
+          {%- set _ = results.append('http://' + vault_name + ':8201') -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ results }}
+
+- name: Filter out current host from retry_join addresses
+  set_fact:
+    retry_join_hosts: "{{ retry_join_addresses | reject('match', '^http://' + vault_instances[inventory_hostname] + ':8201$') | list }}"
+
+- name: Install dependencies
+  ansible.builtin.package:
+    name: "{{ item }}"
+    update_cache: true
+    state: present
+  with_items: "{{ dependencies }}"
+
+- name: Remove existing HashiCorp GPG key file (be sure that it's does not exist)
+  ansible.builtin.file:
+    path: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+    state: absent
+
+- name: Stop Vault service if running (clean-up if previos run failed)
+  ansible.builtin.systemd:
+    name: vault
+    state: stopped
+  ignore_errors: true

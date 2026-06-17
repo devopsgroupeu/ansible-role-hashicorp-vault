@@ -1,0 +1,21 @@
+- name: Reading root token
+  command: cat {{item}}
+  register: root_token
+  with_fileglob: "{{ root_token_dir_output }}/rootkey"
+  delegate_to: localhost
+  become: false
+
+- name: Join Vault Raft Cluster
+  ansible.builtin.shell: |
+    vault operator raft join http://{{ vault_instances.hashicorptest01 }}:8200
+  environment:
+    VAULT_SKIP_VERIFY: "1"
+    VAULT_TOKEN: "{{ root_token.results | first | json_query('stdout') }}"
+    VAULT_ADDR: "http://{{ hostvars[inventory_hostname]['ansible_ssh_host'] }}:8200"
+
+  register: vault_raft_join_result
+  changed_when: "'Joined' in vault_raft_join_result.stdout"
+
+- name: Print the Vault Raft Join Result
+  debug:
+    var: vault_raft_join_result.stdout

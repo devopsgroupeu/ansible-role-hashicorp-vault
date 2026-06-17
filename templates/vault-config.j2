@@ -1,0 +1,33 @@
+api_addr = "http://{{ vault_ips[inventory_hostname] }}:8200"
+cluster_addr = "http://{{ vault_ips[inventory_hostname] }}:8201"
+disable_mlock = true
+disable_cache = true
+ui = true
+
+listener "tcp" {
+  address = "{{ vault_ips[inventory_hostname] }}:8200"
+  cluster_address = "{{ vault_ips[inventory_hostname] }}:8201"
+  #tls_cert_file = "/opt/vault/tls/vault.{{ domain_name }}.crt"
+  #tls_key_file  = "/opt/vault/tls/vault.{{ domain_name }}.key"
+  tls_disable = 1
+  tls_disable_client_certs = true
+  telemetry {
+    unauthenticated_metrics_access = "true"
+  }
+}
+
+storage "raft" {
+  path    = "/opt/vault/data/"
+  node_id = "vault_{{ inventory_hostname_short }}"
+
+  {% for host in retry_join_hosts %}
+  retry_join {
+    leader_api_addr = "{{ host }}"
+  }
+  {% endfor %}
+}
+
+telemetry {
+  disable_hostname = true
+  prometheus_retention_time = "30s"
+}

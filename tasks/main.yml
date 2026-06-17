@@ -1,0 +1,28 @@
+---
+- name: Setup certifcates
+  ansible.builtin.import_tasks: certs.yml
+  delegate_to: localhost
+  run_once: true
+
+- name: Setup HashiCorp Vault
+  ansible.builtin.import_tasks: setup.yml
+  become: true
+
+- name: Install HashiCorp Vault
+  ansible.builtin.import_tasks: install.yml
+  become: true
+
+- name: Init and unseal leader node
+  ansible.builtin.import_tasks: init-unseal.yml
+  become: true
+  when: inventory_hostname == 'hashicorptest01'
+
+- name: Join non-leader nodes to the cluster
+  ansible.builtin.import_tasks: join.yml
+  become: true
+  when: inventory_hostname != 'hashicorptest01'
+
+- name: Init and unseal non-leader nodes
+  ansible.builtin.import_tasks: init-unseal.yml
+  become: true
+  when: inventory_hostname != 'hashicorptest01'

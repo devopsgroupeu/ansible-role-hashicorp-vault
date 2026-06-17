@@ -1,0 +1,20 @@
+---
+domain_name: "example.com"
+vault_ips:
+  hashicorptest01: ""
+  hashicorptest02: ""
+  hashicorptest03: ""
+vault_instances:
+  hashicorptest01: ""
+  hashicorptest02: ""
+  hashicorptest03: ""
+
+dependencies:
+  - wget
+  - lsb-release
+  - gpg
+  - openssl
+  - ca-certificates
+
+unseal_keys_dir_output: "{{ playbook_dir }}/unsealKey"
+root_token_dir_output: "{{ playbook_dir }}/rootKey"
