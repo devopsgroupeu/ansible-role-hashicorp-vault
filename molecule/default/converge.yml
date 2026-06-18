@@ -1,40 +1,46 @@
 ---
 # Converge for the default scenario.
 # Installs Vault via package, generates TLS, configures and starts the service.
-# Init and unseal are disabled so Vault runs in the uninitialized/sealed state,
-# which is sufficient to prove TLS listener is up and the service works.
+# Phase 4: full init + unseal + audit enabled.
 
 - name: Converge
   hosts: all
   become: true
   gather_facts: true
   vars:
-    # Phase 3: init/unseal off — added in Phase 4.
-    vault_init: false
-    vault_unseal: false
-    vault_audit_enabled: false
+    # Phase 4: full init+unseal enabled.
+    vault_init: true
+    vault_unseal: true
+    vault_audit_enabled: true
+
+    # Single share/threshold for a single-node scenario.
+    vault_init_key_shares: 1
+    vault_init_key_threshold: 1
+
+    # Do not encrypt the init output — ansible-vault is not available
+    # unattended in the Molecule environment without a vault password file.
+    vault_init_encrypt_output: false
+
+    # Write the init file to /tmp so it stays ephemeral and is never committed.
+    vault_init_output_path: "/tmp/.vault_init_molecule_default.json"
 
     # mlock cannot be used inside plain Docker containers.
     vault_disable_mlock: true
 
-    # Swap is not configured in containers; swapoff fails gracefully (rc 32)
-    # but suppress it entirely for clarity.
+    # Swap is not configured in containers; suppress swapoff entirely.
     vault_manage_swap: false
 
     # Generate TLS certs via community.crypto so no pre-placed certs are needed.
     vault_tls_generate_certs: true
 
-    # SANs: shared leader servername + container hostname + loopback.
-    # vault_raft_peers defaults to groups['vault'] which resolves to
-    # the single container, so per-node SANs are covered automatically.
+    # Shared leader servername SAN (must match retry_join blocks).
     vault_tls_leader_servername: "vault.cluster.internal"
 
-    # Use a fixed api_addr / cluster_addr (no live IP required).
+    # Use loopback for api_addr / cluster_addr in the single-node container.
     vault_api_addr: "https://127.0.0.1:8200"
     vault_cluster_addr: "https://127.0.0.1:8201"
 
-    # Single-node cluster — peers defaults to [inventory_hostname].
-    # No retry_join blocks are rendered (self is excluded from peer list).
+    # Single-node cluster.
     vault_raft_peers:
       - vault-default
 

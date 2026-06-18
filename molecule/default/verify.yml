@@ -1,12 +1,15 @@
 ---
-# Verify the default scenario: Vault is installed, configured, and the TLS
-# listener is up. Vault is uninitialized/sealed (Phase 3 scope); the health
-# endpoint returns HTTP 501 which confirms TLS is working.
+# Verify the default scenario: Vault is initialized, unsealed, Raft formed,
+# audit device enabled, and the service is running and enabled.
 
-- name: Verify Vault installation and TLS listener
+- name: Verify Vault full init+unseal state
   hosts: all
   become: true
   gather_facts: true
+  vars:
+    __verify_vault_tls_ca: "/opt/vault/tls/vault-ca.pem"
+    __verify_vault_audit_log: "/opt/vault/audit/vault_audit.log"
+    __verify_init_output_path: "/tmp/.vault_init_molecule_default.json"
   tasks:
     # --- Service checks -------------------------------------------------------
 
@@ -35,22 +38,7 @@
         fail_msg: "/etc/vault.d/vault.hcl not found"
         success_msg: "/etc/vault.d/vault.hcl exists"
 
-    - name: Stat TLS cert file
-      ansible.builtin.stat:
-        path: /opt/vault/tls/vault-cert.pem
-      register: __verify_vault_cert
-
-    - name: Assert TLS cert file exists
-      ansible.builtin.assert:
-        that: __verify_vault_cert['stat']['exists']
-        fail_msg: "/opt/vault/tls/vault-cert.pem not found"
-        success_msg: "TLS cert file exists"
-
-    # --- TLS listener health check --------------------------------------------
-    # Vault running uninitialized returns HTTP 501 on /v1/sys/health.
-    # This proves the TLS listener is answering with our generated cert.
-    # validate_certs=false because the CA is self-signed and not in the
-    # system trust store (vault_tls_install_ca_to_trust_store=false in converge).
+    # --- Vault status: initialized + unsealed + raft --------------------------
 
     - name: Wait for Vault TLS listener to become ready
       ansible.builtin.wait_for:
@@ -59,38 +47,113 @@
         timeout: 30
         state: started
 
-    - name: Query Vault health endpoint (expect 501 = not initialized)
-      ansible.builtin.uri:
-        url: "https://127.0.0.1:8200/v1/sys/health"
-        method: GET
-        validate_certs: false
-        status_code:
-          - 200
-          - 429
-          - 472
-          - 473
-          - 501
-          - 503
-        return_content: true
-      register: __verify_vault_health
-      retries: 5
-      delay: 3
+    - name: Query Vault status (expect initialized+unsealed, rc=0)
+      ansible.builtin.command: >-
+        vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+      register: __verify_vault_status_cmd
+      changed_when: false
+      failed_when: __verify_vault_status_cmd['rc'] not in [0, 2]
+      retries: 6
+      delay: 5
+      until: __verify_vault_status_cmd['rc'] == 0
 
-    - name: Assert Vault health returns 501 (not initialized, listener up)
+    - name: Parse Vault status JSON
+      ansible.builtin.set_fact:
+        __verify_vault_status: "{{ __verify_vault_status_cmd['stdout'] | from_json }}"
+
+    - name: Assert Vault is initialized
       ansible.builtin.assert:
         that:
-          - __verify_vault_health['status'] == 501
-        fail_msg: >-
-          Expected HTTP 501 (Vault not initialized) but got
-          {{ __verify_vault_health['status'] }}. TLS listener may not be up.
-        success_msg: "Vault TLS listener is up and returns 501 (not initialized)"
+          - __verify_vault_status['initialized'] | bool
+        fail_msg: "Vault is not initialized"
+        success_msg: "Vault is initialized"
 
-    - name: Assert Vault binary is on PATH
+    - name: Assert Vault is unsealed
+      ansible.builtin.assert:
+        that:
+          - not (__verify_vault_status['sealed'] | bool)
+        fail_msg: "Vault is sealed"
+        success_msg: "Vault is unsealed"
+
+    - name: Assert storage type is raft
+      ansible.builtin.assert:
+        that:
+          - __verify_vault_status['storage_type'] == 'raft'
+        fail_msg: >-
+          Expected storage_type 'raft' but got
+          '{{ __verify_vault_status['storage_type'] }}'
+        success_msg: "Vault storage type is raft"
+
+    # --- Raft peer check ------------------------------------------------------
+
+    - name: Read root token from controller init file
+      ansible.builtin.slurp:
+        src: "{{ __verify_init_output_path }}"
+      delegate_to: localhost
+      become: false
+      register: __verify_init_file_raw
+      no_log: true
+
+    - name: Parse init file and extract root token
+      ansible.builtin.set_fact:
+        __verify_root_token: "{{ (__verify_init_file_raw['content'] | b64decode | from_json)['root_token'] }}"
+      no_log: true
+
+    - name: Query Raft peer list
+      ansible.builtin.command: >-
+        vault operator raft list-peers -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+        VAULT_TOKEN: "{{ __verify_root_token }}"
+      register: __verify_raft_peers_cmd
+      changed_when: false
+      failed_when: __verify_raft_peers_cmd['rc'] != 0
+      no_log: true
+
+    - name: Parse Raft peers JSON
+      ansible.builtin.set_fact:
+        __verify_raft_peers: "{{ (__verify_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] }}"
+
+    - name: Assert Raft peer count is 1 (single-node scenario)
+      ansible.builtin.assert:
+        that:
+          - __verify_raft_peers | length == 1
+        fail_msg: >-
+          Expected 1 Raft peer but found {{ __verify_raft_peers | length }}
+        success_msg: "Raft peer count is 1"
+
+    - name: Assert all Raft peers are voters
+      ansible.builtin.assert:
+        that:
+          - __verify_raft_peers | selectattr('voter', 'equalto', true) | list | length == 1
+        fail_msg: "Not all Raft peers are voters"
+        success_msg: "All Raft peers are voters"
+
+    # --- Audit device check ---------------------------------------------------
+
+    - name: Stat audit log file
+      ansible.builtin.stat:
+        path: "{{ __verify_vault_audit_log }}"
+      register: __verify_audit_log_stat
+
+    - name: Assert audit log file exists
+      ansible.builtin.assert:
+        that: __verify_audit_log_stat['stat']['exists']
+        fail_msg: "Vault audit log {{ __verify_vault_audit_log }} not found"
+        success_msg: "Vault audit log exists"
+
+    # --- Vault binary sanity check -------------------------------------------
+
+    - name: Assert Vault binary returns version string
       ansible.builtin.command: vault version
       register: __verify_vault_version
       changed_when: false
 
-    - name: Assert Vault binary returns version string
+    - name: Assert version output contains 'Vault'
       ansible.builtin.assert:
         that:
           - "'Vault' in __verify_vault_version['stdout']"

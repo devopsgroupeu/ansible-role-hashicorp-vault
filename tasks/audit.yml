@@ -1,5 +1,86 @@
 ---
-# Phase 2+ implementation placeholder.
-- name: "Audit tasks placeholder"
-  ansible.builtin.debug:
-    msg: "Placeholder - implemented in a later phase"
+# ==============================================================================
+# Enable Vault file audit device idempotently.
+# Only included when vault_config_only=false and vault_audit_enabled=true
+# (gated in main.yml). Requires a root token from init_unseal.yml.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Ensure audit directory exists with correct ownership and permissions.
+#    The vault user must be able to write the audit log.
+# ------------------------------------------------------------------------------
+
+- name: Ensure audit log directory exists with correct permissions
+  ansible.builtin.file:
+    path: "{{ vault_audit_dir }}"
+    state: directory
+    owner: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    mode: "0750"
+  tags: audit
+
+# ------------------------------------------------------------------------------
+# 2. Check which audit devices are already enabled.
+#    changed_when: false — read-only operation.
+#    no_log: true — VAULT_TOKEN in environment.
+# ------------------------------------------------------------------------------
+
+- name: List currently enabled audit devices
+  ansible.builtin.command: >-
+    {{ vault_bin_path }} audit list -format=json
+  environment:
+    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+  register: __vault_audit_list_cmd
+  changed_when: false
+  failed_when: __vault_audit_list_cmd['rc'] not in [0, 2]
+  no_log: true
+  when:
+    - __vault_root_token is defined
+    - __vault_root_token | length > 0
+  tags: audit
+
+# rc=2 from 'vault audit list' means no devices enabled yet (empty list).
+# Parse JSON only when rc=0 and stdout is non-empty.
+- name: Parse enabled audit devices
+  ansible.builtin.set_fact:
+    __vault_audit_devices: >-
+      {%- if __vault_audit_list_cmd['rc'] | default(2) == 0
+             and __vault_audit_list_cmd['stdout'] | default('') | length > 0 -%}
+        {{ __vault_audit_list_cmd['stdout'] | from_json }}
+      {%- else -%}
+        {{ {} }}
+      {%- endif -%}
+  when:
+    - __vault_audit_list_cmd is defined
+  tags: audit
+
+# ------------------------------------------------------------------------------
+# 3. Enable the file audit device when not already present at vault_audit_path.
+#    no_log: true — VAULT_TOKEN in environment.
+# ------------------------------------------------------------------------------
+
+- name: Enable file audit device
+  ansible.builtin.command: >-
+    {{ vault_bin_path }} audit enable
+    -path={{ vault_audit_path }}
+    file
+    file_path={{ vault_audit_file_path }}
+    {%- for key, value in (vault_audit_options | default({}) | dict2items) %}
+    {{ key }}={{ value }}
+    {%- endfor %}
+  environment:
+    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+  register: __vault_audit_enable_cmd
+  changed_when: __vault_audit_enable_cmd['rc'] == 0
+  failed_when: __vault_audit_enable_cmd['rc'] != 0
+  no_log: true
+  when:
+    - __vault_root_token is defined
+    - __vault_root_token | length > 0
+    - __vault_audit_devices is defined
+    - vault_audit_path not in (__vault_audit_devices | default({}))
+  tags: audit

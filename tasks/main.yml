@@ -21,6 +21,10 @@
   when: not vault_config_only | bool
   tags: service
 
+- name: Flush pending handlers before init+unseal
+  ansible.builtin.meta: flush_handlers
+  when: not vault_config_only | bool
+
 - name: Initialize and unseal Vault
   ansible.builtin.include_tasks: init_unseal.yml
   when: not vault_config_only | bool
