@@ -3,15 +3,18 @@
   ansible.builtin.systemd:
     daemon_reload: true
   listen: "reload systemd daemon"
+  when: not vault_config_only | bool
 
 - name: Restart HashiCorp Vault
   ansible.builtin.systemd:
     name: vault
     state: restarted
   listen: "restart vault"
+  when: not vault_config_only | bool
 
 - name: Reload HashiCorp Vault
   ansible.builtin.systemd:
     name: vault
     state: reloaded
   listen: "reload vault"
+  when: not vault_config_only | bool

@@ -1,5 +1,151 @@
 ---
-# Phase 2+ implementation placeholder.
-- name: "Config tasks placeholder"
-  ansible.builtin.debug:
-    msg: "Placeholder - implemented in a later phase"
+# ==============================================================================
+# Config: dirs, perms, vault.env, vault.hcl, vault.service, swap, selinux
+# ==============================================================================
+
+# Build __vault_retry_join_peers: list of {addr: <ip|hostname>} for every peer
+# except the current host. Falls back to the peer inventory name when
+# ansible_default_ipv4.address is not yet gathered (e.g. render-only mode).
+- name: Compute __vault_retry_join_peers (peers minus self, address-resolved)
+  ansible.builtin.set_fact:
+    __vault_retry_join_peers: >-
+      {%- set peers = [] -%}
+      {%- for peer in vault_raft_peers -%}
+        {%- if peer != inventory_hostname -%}
+          {%- if hostvars[peer] is defined
+                 and 'ansible_default_ipv4' in hostvars[peer]
+                 and hostvars[peer]['ansible_default_ipv4'] is mapping
+                 and 'address' in hostvars[peer]['ansible_default_ipv4'] -%}
+            {%- set addr = hostvars[peer]['ansible_default_ipv4']['address'] -%}
+          {%- else -%}
+            {%- set addr = peer -%}
+          {%- endif -%}
+          {%- set _ = peers.append({'addr': addr}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ peers }}
+  tags: config
+
+# ==============================================================================
+# Directories
+# ==============================================================================
+
+- name: Create Vault directories
+  ansible.builtin.file:
+    path: "{{ item['path'] }}"
+    state: directory
+    owner: "{{ item['owner'] }}"
+    group: "{{ item['group'] }}"
+    mode: "{{ item['mode'] }}"
+  loop:
+    - path: "{{ vault_config_dir }}"
+      owner: "{{ vault_user }}"
+      group: "{{ vault_group }}"
+      mode: "{{ vault_config_dir_mode }}"
+    - path: "{{ vault_data_dir }}"
+      owner: "{{ vault_user }}"
+      group: "{{ vault_group }}"
+      mode: "{{ vault_data_dir_mode }}"
+    - path: "{{ vault_tls_dir }}"
+      owner: root
+      group: "{{ vault_group }}"
+      mode: "0750"
+    - path: "{{ vault_audit_dir }}"
+      owner: "{{ vault_user }}"
+      group: "{{ vault_group }}"
+      mode: "0750"
+  loop_control:
+    label: "{{ item['path'] }}"
+  tags: config
+
+# ==============================================================================
+# vault.env — must exist before vault.hcl or the systemd unit fails to start.
+# Rendered first so daemon-reload picks it up correctly.
+# ==============================================================================
+
+- name: Render vault.env
+  ansible.builtin.template:
+    src: vault.env.j2
+    dest: "{{ vault_config_dir }}/vault.env"
+    owner: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    mode: "{{ vault_config_file_mode }}"
+    backup: true
+  notify:
+    - reload systemd daemon
+    - restart vault
+  tags: config
+
+# ==============================================================================
+# vault.hcl
+# ==============================================================================
+
+- name: Render vault.hcl
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: "{{ vault_config_dir }}/vault.hcl"
+    owner: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    mode: "{{ vault_config_file_mode }}"
+    backup: true
+  notify:
+    - reload systemd daemon
+    - restart vault
+  tags: config
+
+# ==============================================================================
+# vault.service
+# ==============================================================================
+
+- name: Render vault.service systemd unit
+  ansible.builtin.template:
+    src: vault.service.j2
+    dest: /etc/systemd/system/vault.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd daemon
+    - restart vault
+  tags: config
+
+# ==============================================================================
+# Swap management (compensate for disable_mlock=true)
+# ==============================================================================
+
+- name: Disable swap immediately
+  ansible.builtin.command: swapoff -a
+  when: vault_manage_swap | bool
+  changed_when: false
+  # rc 32 = no swap configured (common in containers); rc 0 = success
+  failed_when: __vault_swapoff.rc not in [0, 32]
+  register: __vault_swapoff
+  tags: config
+
+- name: Comment out swap entries from /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#\n].*?\sswap\s+sw\s.*)$'
+    replace: '# \1'
+    backup: true
+  when: vault_manage_swap | bool
+  tags: config
+
+# ==============================================================================
+# SELinux context restore (RHEL-family only)
+# ==============================================================================
+
+- name: Restore SELinux context on Vault directories
+  ansible.builtin.command: restorecon -R "{{ item }}"
+  loop:
+    - "{{ vault_config_dir }}"
+    - "{{ vault_data_dir }}"
+    - "{{ vault_tls_dir }}"
+    - "{{ vault_audit_dir }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - vault_manage_selinux | bool
+    - ansible_facts['os_family'] == 'RedHat'
+  changed_when: false
+  tags: config

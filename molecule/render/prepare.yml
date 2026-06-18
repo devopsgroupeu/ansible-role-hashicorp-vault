@@ -1,0 +1,65 @@
+---
+# Prepare the render container without installing Vault.
+# Creates the vault system group/user and placeholder TLS files so that
+# config.yml can render vault.hcl with correct ownership and TLS paths
+# without requiring the full Vault package install (Phase 3).
+
+- name: Prepare render container
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Install minimal dependencies
+      ansible.builtin.raw: >-
+        apt-get update -qq &&
+        apt-get install -y -qq --no-install-recommends python3 python3-apt passwd procps
+      changed_when: true
+
+    - name: Gather facts after bootstrap
+      ansible.builtin.setup:
+
+    - name: Create vault system group
+      ansible.builtin.group:
+        name: vault
+        system: true
+        state: present
+
+    - name: Create vault system user
+      ansible.builtin.user:
+        name: vault
+        group: vault
+        system: true
+        shell: /sbin/nologin
+        create_home: false
+        state: present
+
+    - name: Create Vault TLS directory for placeholder certs
+      ansible.builtin.file:
+        path: /opt/vault/tls
+        state: directory
+        owner: root
+        group: vault
+        mode: "0750"
+
+    - name: Create placeholder TLS cert file
+      ansible.builtin.copy:
+        content: "# placeholder — replaced by tls.yml in full install\n"
+        dest: /opt/vault/tls/vault-cert.pem
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Create placeholder TLS key file
+      ansible.builtin.copy:
+        content: "# placeholder — replaced by tls.yml in full install\n"
+        dest: /opt/vault/tls/vault-key.pem
+        owner: root
+        group: vault
+        mode: "0640"
+
+    - name: Create placeholder CA file
+      ansible.builtin.copy:
+        content: "# placeholder — replaced by tls.yml in full install\n"
+        dest: /opt/vault/tls/vault-ca.pem
+        owner: root
+        group: root
+        mode: "0644"

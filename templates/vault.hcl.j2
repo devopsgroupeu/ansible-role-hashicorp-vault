@@ -1,0 +1,103 @@
+# Managed by Ansible — do not edit manually.
+# Changes to this file will be overwritten on the next playbook run.
+
+disable_mlock = {{ vault_disable_mlock | lower }}
+
+ui         = {{ vault_ui | lower }}
+log_level  = "{{ vault_log_level }}"
+log_format = "{{ vault_log_format }}"
+
+default_lease_ttl = "{{ vault_default_lease_ttl }}"
+max_lease_ttl     = "{{ vault_max_lease_ttl }}"
+{% if vault_cluster_name %}
+cluster_name = "{{ vault_cluster_name }}"
+{% endif %}
+
+storage "raft" {
+  path                   = "{{ vault_data_dir }}"
+  node_id                = "{{ vault_raft_node_id }}"
+  performance_multiplier = {{ vault_raft_performance_multiplier }}
+{% for peer in __vault_retry_join_peers %}
+
+  retry_join {
+    leader_api_addr         = "https://{{ peer['addr'] }}:8200"
+    leader_tls_servername   = "{{ vault_tls_leader_servername }}"
+    leader_ca_cert_file     = "{{ vault_tls_ca_file }}"
+    leader_client_cert_file = "{{ vault_tls_cert_file }}"
+    leader_client_key_file  = "{{ vault_tls_key_file }}"
+  }
+{% endfor %}
+}
+
+listener "tcp" {
+  address         = "{{ vault_listen_address }}"
+  cluster_address = "{{ vault_cluster_listen_address }}"
+
+{% if vault_tls_enabled | bool %}
+  tls_cert_file            = "{{ vault_tls_cert_file }}"
+  tls_key_file             = "{{ vault_tls_key_file }}"
+  tls_min_version          = "{{ vault_tls_min_version }}"
+  tls_max_version          = "{{ vault_tls_max_version }}"
+  tls_disable_client_certs = {{ vault_tls_disable_client_certs | lower }}
+{% if vault_tls_min_version == 'tls12' and vault_tls_max_version == 'tls12' %}
+  tls_cipher_suites        = "{{ vault_tls_cipher_suites }}"
+{% endif %}
+{% else %}
+  tls_disable = true
+{% endif %}
+
+  telemetry {
+    unauthenticated_metrics_access = {{ vault_telemetry_unauthenticated_metrics_access | lower }}
+  }
+}
+
+api_addr     = "{{ vault_api_addr }}"
+cluster_addr = "{{ vault_cluster_addr }}"
+
+{% if vault_telemetry_enabled | bool %}
+telemetry {
+  prometheus_retention_time = "{{ vault_telemetry_prometheus_retention_time }}"
+  disable_hostname          = {{ vault_telemetry_disable_hostname | lower }}
+}
+{% endif %}
+{% if vault_seal_type != 'shamir' %}
+
+{% if vault_seal_type == 'transit' %}
+seal "transit" {
+  address         = "{{ vault_seal_transit_address }}"
+  key_name        = "{{ vault_seal_transit_key_name }}"
+  mount_path      = "{{ vault_seal_transit_mount_path }}"
+{% if vault_seal_transit_namespace %}
+  namespace       = "{{ vault_seal_transit_namespace }}"
+{% endif %}
+{% if vault_seal_transit_tls_ca_cert %}
+  tls_ca_cert     = "{{ vault_seal_transit_tls_ca_cert }}"
+{% endif %}
+  disable_renewal = "{{ vault_seal_transit_disable_renewal | lower }}"
+}
+{% endif %}
+{% if vault_seal_type == 'awskms' %}
+seal "awskms" {
+  region     = "{{ vault_seal_awskms_region }}"
+  kms_key_id = "{{ vault_seal_awskms_kms_key_id }}"
+}
+{% endif %}
+{% if vault_seal_type == 'azurekeyvault' %}
+seal "azurekeyvault" {
+  tenant_id  = "{{ vault_seal_azurekeyvault_tenant_id }}"
+  vault_name = "{{ vault_seal_azurekeyvault_vault_name }}"
+  key_name   = "{{ vault_seal_azurekeyvault_key_name }}"
+{% if vault_seal_azurekeyvault_client_id %}
+  client_id  = "{{ vault_seal_azurekeyvault_client_id }}"
+{% endif %}
+}
+{% endif %}
+{% if vault_seal_type == 'gcpckms' %}
+seal "gcpckms" {
+  project     = "{{ vault_seal_gcpckms_project }}"
+  region      = "{{ vault_seal_gcpckms_region }}"
+  key_ring    = "{{ vault_seal_gcpckms_key_ring }}"
+  crypto_key  = "{{ vault_seal_gcpckms_crypto_key }}"
+}
+{% endif %}
+{% endif %}

@@ -1,0 +1,43 @@
+---
+# Converge for the offline render scenario.
+# vault_config_only: true skips install / service / init+unseal.
+# vault_raft_peers is set to a 3-node list so retry_join blocks render.
+# vault_tls_enabled: true with placeholder BYO cert paths (created in prepare).
+# No Vault binary is installed or started.
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    # Render-only: skip install/service/init
+    vault_config_only: true
+
+    # 3-node peer list — produces 2 retry_join blocks (self excluded at runtime)
+    vault_raft_peers:
+      - vault-render
+      - vault-node-2
+      - vault-node-3
+
+    # TLS on (default) with BYO certs placed by prepare.yml
+    vault_tls_enabled: true
+    vault_tls_generate_certs: false
+    vault_tls_cert_file: /opt/vault/tls/vault-cert.pem
+    vault_tls_key_file: /opt/vault/tls/vault-key.pem
+    vault_tls_ca_file: /opt/vault/tls/vault-ca.pem
+
+    # Use default tls12/tls13 range — cipher suites must NOT appear
+    vault_tls_min_version: "tls12"
+    vault_tls_max_version: "tls13"
+
+    # Telemetry on (default)
+    vault_telemetry_enabled: true
+    vault_telemetry_unauthenticated_metrics_access: false
+
+    # Use deterministic api_addr / cluster_addr (no ansible_default_ipv4 dependency)
+    vault_api_addr: "https://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault

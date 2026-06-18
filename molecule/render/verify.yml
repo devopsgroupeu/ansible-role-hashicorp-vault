@@ -1,0 +1,169 @@
+---
+# Verify rendered Vault configuration files without starting Vault.
+# All checks use slurp + assert — no service interaction required.
+
+- name: Verify rendered Vault config
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Slurp rendered vault.hcl
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.hcl
+      register: vault_hcl_raw
+
+    - name: Decode vault.hcl content
+      ansible.builtin.set_fact:
+        vault_hcl: "{{ vault_hcl_raw['content'] | b64decode }}"
+
+    # --- Core top-level settings ---
+
+    - name: Assert disable_mlock is present
+      ansible.builtin.assert:
+        that: "'disable_mlock = true' in vault_hcl"
+        fail_msg: "vault.hcl missing 'disable_mlock = true'"
+
+    - name: Assert storage raft stanza is present
+      ansible.builtin.assert:
+        that: "'storage \"raft\"' in vault_hcl"
+        fail_msg: "vault.hcl missing 'storage \"raft\"' stanza"
+
+    - name: Assert at least one retry_join block is rendered
+      ansible.builtin.assert:
+        that: "'retry_join' in vault_hcl"
+        fail_msg: "vault.hcl has no retry_join block (peer list not expanding)"
+
+    # --- TLS listener assertions ---
+
+    - name: Assert tls_cert_file is present in listener
+      ansible.builtin.assert:
+        that: "'tls_cert_file' in vault_hcl"
+        fail_msg: "vault.hcl missing tls_cert_file in listener"
+
+    - name: Assert tls_min_version is present in listener
+      ansible.builtin.assert:
+        that: "'tls_min_version' in vault_hcl"
+        fail_msg: "vault.hcl missing tls_min_version in listener"
+
+    # Cipher suites must NOT appear when tls_max_version is tls13 (default converge)
+    - name: Assert cipher_suites are absent under tls13 max version
+      ansible.builtin.assert:
+        that: "'tls_cipher_suites' not in vault_hcl"
+        fail_msg: >-
+          vault.hcl contains tls_cipher_suites but tls_max_version=tls13.
+          Cipher suites are only valid when min==max==tls12.
+
+    # --- Addresses ---
+
+    - name: Assert api_addr is present and uses https
+      ansible.builtin.assert:
+        that:
+          - "'api_addr' in vault_hcl"
+          - "'https://' in vault_hcl"
+        fail_msg: "vault.hcl missing api_addr or does not use https://"
+
+    - name: Assert cluster_addr is present
+      ansible.builtin.assert:
+        that: "'cluster_addr' in vault_hcl"
+        fail_msg: "vault.hcl missing cluster_addr"
+
+    # --- Listener-level telemetry sub-stanza ---
+    # unauthenticated_metrics_access must be inside listener "tcp" > telemetry {}
+
+    - name: Assert listener telemetry sub-stanza is present
+      ansible.builtin.assert:
+        that: "'unauthenticated_metrics_access' in vault_hcl"
+        fail_msg: "vault.hcl missing unauthenticated_metrics_access in listener telemetry sub-stanza"
+
+    # --- Top-level telemetry stanza ---
+
+    - name: Assert top-level telemetry stanza is present (vault_telemetry_enabled=true)
+      ansible.builtin.assert:
+        that: "'prometheus_retention_time' in vault_hcl"
+        fail_msg: "vault.hcl missing top-level telemetry stanza (prometheus_retention_time absent)"
+
+    # --- Verify vault.env exists and is non-empty ---
+
+    - name: Slurp vault.env
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.env
+      register: vault_env_raw
+
+    - name: Assert vault.env is not empty
+      ansible.builtin.assert:
+        that: (vault_env_raw['content'] | b64decode | length) > 0
+        fail_msg: "vault.env is empty — it must always contain at least a header comment"
+
+    - name: Assert VAULT_ENABLE_FILE_PERMISSIONS_CHECK is in vault.env
+      ansible.builtin.assert:
+        that: "'VAULT_ENABLE_FILE_PERMISSIONS_CHECK' in (vault_env_raw['content'] | b64decode)"
+        fail_msg: "vault.env missing VAULT_ENABLE_FILE_PERMISSIONS_CHECK"
+
+    # --- Verify vault.service exists ---
+
+    - name: Stat vault.service
+      ansible.builtin.stat:
+        path: /etc/systemd/system/vault.service
+      register: vault_service_stat
+
+    - name: Assert vault.service exists
+      ansible.builtin.assert:
+        that: vault_service_stat['stat']['exists']
+        fail_msg: "/etc/systemd/system/vault.service was not rendered"
+
+    - name: Slurp vault.service
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/vault.service
+      register: vault_service_raw
+
+    - name: Assert vault.service key directives are present
+      ansible.builtin.assert:
+        that:
+          - "'Type=notify' in (vault_service_raw['content'] | b64decode)"
+          - "'AmbientCapabilities=CAP_IPC_LOCK' in (vault_service_raw['content'] | b64decode)"
+          - "'LimitMEMLOCK=infinity' in (vault_service_raw['content'] | b64decode)"
+          - "'ExecReload=/bin/kill --signal HUP' in (vault_service_raw['content'] | b64decode)"
+        fail_msg: "vault.service is missing one or more required directives"
+
+# ---------------------------------------------------------------------------
+# Variant: verify tls_cipher_suites IS rendered when min==max==tls12
+# We re-run config tasks inline against the same container with overridden vars.
+# ---------------------------------------------------------------------------
+
+- name: Converge cipher-suite variant (tls12 only)
+  hosts: all
+  gather_facts: true
+  vars:
+    vault_config_only: true
+    vault_raft_peers:
+      - vault-render
+      - vault-node-2
+      - vault-node-3
+    vault_tls_enabled: true
+    vault_tls_generate_certs: false
+    vault_tls_cert_file: /opt/vault/tls/vault-cert.pem
+    vault_tls_key_file: /opt/vault/tls/vault-key.pem
+    vault_tls_ca_file: /opt/vault/tls/vault-ca.pem
+    vault_tls_min_version: "tls12"
+    vault_tls_max_version: "tls12"
+    vault_api_addr: "https://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+  tasks:
+    - name: Include role for tls12-only cipher-suite variant
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+- name: Verify cipher-suites present under tls12 only
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Slurp vault.hcl after tls12-only render
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.hcl
+      register: vault_hcl_tls12_raw
+
+    - name: Assert tls_cipher_suites IS present when min==max==tls12
+      ansible.builtin.assert:
+        that: "'tls_cipher_suites' in (vault_hcl_tls12_raw['content'] | b64decode)"
+        fail_msg: >-
+          vault.hcl is missing tls_cipher_suites even though
+          tls_min_version==tls_max_version==tls12.
