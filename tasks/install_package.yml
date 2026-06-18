@@ -1,5 +1,81 @@
 ---
-# Phase 2+ implementation placeholder.
-- name: "Install package tasks placeholder"
-  ansible.builtin.debug:
-    msg: "Placeholder - implemented in a later phase"
+# ==============================================================================
+# Install Vault via package manager (APT / DNF)
+# ==============================================================================
+
+# --- Debian / Ubuntu ----------------------------------------------------------
+
+- name: Install prerequisite packages (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: "{{ __vault_pkg_deps['Debian'] }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Download HashiCorp APT GPG key
+  ansible.builtin.get_url:
+    url: "{{ vault_apt_gpg_key_url }}"
+    dest: /etc/apt/keyrings/hashicorp.asc
+    mode: "0644"
+    force: false
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Add HashiCorp APT repository (deb822 format)
+  ansible.builtin.deb822_repository:
+    name: hashicorp
+    types:
+      - deb
+    uris: "{{ vault_apt_repo_url }}"
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components:
+      - main
+    signed_by: /etc/apt/keyrings/hashicorp.asc
+    architectures:
+      - "{{ vault_arch }}"
+    state: present
+    enabled: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+# Pin to the exact version when possible. The HashiCorp APT repository uses the
+# Vault version string directly (e.g. 2.0.3-1). We use a glob suffix (*) to
+# accommodate any minor packaging revision while still pinning the Vault release.
+# If the exact version string is unavailable (e.g. future release not yet
+# mirrored), remove the '=' prefix from the package name and install the
+# latest published version instead.
+- name: Install Vault package (Debian/Ubuntu, exact version pin)
+  ansible.builtin.apt:
+    name: "{{ vault_package_name }}={{ vault_version }}*"
+    state: present
+    update_cache: true
+    allow_downgrade: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+# --- RHEL / EL ----------------------------------------------------------------
+
+- name: Install prerequisite packages (RHEL/EL)
+  ansible.builtin.dnf:
+    name: "{{ __vault_pkg_deps['RedHat'] }}"
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Add HashiCorp YUM/DNF repository
+  ansible.builtin.yum_repository:
+    name: hashicorp
+    description: HashiCorp Stable - $basearch
+    baseurl: "{{ vault_rpm_repo_baseurl }}"
+    gpgkey: "{{ vault_rpm_gpg_key_url }}"
+    gpgcheck: true
+    enabled: true
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# DNF supports version pinning via the name-version-release format.
+# Use vault_version directly; packaging epochs differ — omit them and rely on
+# exact version match. Falls back to latest in the locked major if pin fails.
+- name: Install Vault package (RHEL/EL, exact version pin)
+  ansible.builtin.dnf:
+    name: "{{ vault_package_name }}-{{ vault_version }}"
+    state: present
+    allow_downgrade: true
+  when: ansible_facts['os_family'] == 'RedHat'

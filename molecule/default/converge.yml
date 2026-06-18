@@ -1,0 +1,50 @@
+---
+# Converge for the default scenario.
+# Installs Vault via package, generates TLS, configures and starts the service.
+# Init and unseal are disabled so Vault runs in the uninitialized/sealed state,
+# which is sufficient to prove TLS listener is up and the service works.
+
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    # Phase 3: init/unseal off — added in Phase 4.
+    vault_init: false
+    vault_unseal: false
+    vault_audit_enabled: false
+
+    # mlock cannot be used inside plain Docker containers.
+    vault_disable_mlock: true
+
+    # Swap is not configured in containers; swapoff fails gracefully (rc 32)
+    # but suppress it entirely for clarity.
+    vault_manage_swap: false
+
+    # Generate TLS certs via community.crypto so no pre-placed certs are needed.
+    vault_tls_generate_certs: true
+
+    # SANs: shared leader servername + container hostname + loopback.
+    # vault_raft_peers defaults to groups['vault'] which resolves to
+    # the single container, so per-node SANs are covered automatically.
+    vault_tls_leader_servername: "vault.cluster.internal"
+
+    # Use a fixed api_addr / cluster_addr (no live IP required).
+    vault_api_addr: "https://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+
+    # Single-node cluster — peers defaults to [inventory_hostname].
+    # No retry_join blocks are rendered (self is excluded from peer list).
+    vault_raft_peers:
+      - vault-default
+
+    # Keep telemetry enabled (default).
+    vault_telemetry_enabled: true
+
+    # Do not install CA into trust store in this ephemeral container.
+    vault_tls_install_ca_to_trust_store: false
+
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault

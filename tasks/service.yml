@@ -1,5 +1,13 @@
 ---
-# Phase 2+ implementation placeholder.
-- name: "Service tasks placeholder"
-  ansible.builtin.debug:
-    msg: "Placeholder - implemented in a later phase"
+# ==============================================================================
+# Manage the vault systemd service.
+# This file is only included when vault_config_only=false.
+# ==============================================================================
+
+- name: Enable and start Vault service
+  ansible.builtin.systemd:
+    name: vault
+    state: "{{ vault_service_state }}"
+    enabled: "{{ vault_service_enabled | bool }}"
+    daemon_reload: true
+  tags: service

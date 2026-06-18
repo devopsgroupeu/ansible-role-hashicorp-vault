@@ -1,0 +1,163 @@
+---
+# ==============================================================================
+# Generate a self-signed CA + node certificate via community.crypto (ownca).
+# For dev/test use. In production supply BYO certs (vault_tls_generate_certs=false).
+# ==============================================================================
+
+# Build the full SAN list once so it is available to both the CSR and the
+# idempotency check below.
+#
+# SAN order:
+#   1. Shared DNS SAN (== leader_tls_servername for retry_join)
+#   2. Per-peer DNS SANs (inventory hostnames from vault_raft_peers)
+#   3. Per-peer IP SANs  (from hostvars; falls back silently when not gathered)
+#   4. Extra SANs        (vault_tls_extra_sans, each already prefixed "DNS:" / "IP:")
+#   5. Localhost         (always included for health checks)
+- name: Compute full SAN list for node certificate
+  ansible.builtin.set_fact:
+    __vault_tls_sans: >-
+      {%- set sans = [] -%}
+      {%- set _ = sans.append('DNS:' ~ vault_tls_leader_servername) -%}
+      {%- for peer in vault_raft_peers -%}
+        {%- set _ = sans.append('DNS:' ~ peer) -%}
+        {%- if hostvars[peer] is defined
+               and 'ansible_default_ipv4' in hostvars[peer]
+               and hostvars[peer]['ansible_default_ipv4'] is mapping
+               and 'address' in hostvars[peer]['ansible_default_ipv4'] -%}
+          {%- set _ = sans.append('IP:' ~ hostvars[peer]['ansible_default_ipv4']['address']) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- for extra in vault_tls_extra_sans -%}
+        {%- set _ = sans.append(extra) -%}
+      {%- endfor -%}
+      {%- set _ = sans.append('IP:127.0.0.1') -%}
+      {{ sans }}
+  tags: tls
+
+# --- CA private key -----------------------------------------------------------
+
+- name: Generate CA private key (ECC)
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_tls_dir }}/vault-ca-key.pem"
+    type: ECC
+    curve: "{{ vault_tls_cert_curve }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: vault_tls_cert_key_type == 'ECC'
+  tags: tls
+
+- name: Generate CA private key (RSA)
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_tls_dir }}/vault-ca-key.pem"
+    type: RSA
+    size: "{{ vault_tls_cert_size }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: vault_tls_cert_key_type == 'RSA'
+  tags: tls
+
+# --- Self-signed CA certificate -----------------------------------------------
+
+- name: Generate CA certificate (self-signed)
+  community.crypto.x509_certificate:
+    path: "{{ vault_tls_ca_file }}"
+    privatekey_path: "{{ vault_tls_dir }}/vault-ca-key.pem"
+    provider: selfsigned
+    selfsigned_not_before: "-1d"
+    selfsigned_not_after: "{{ vault_tls_cert_validity }}"
+    owner: root
+    group: root
+    mode: "{{ vault_tls_cert_mode }}"
+  tags: tls
+
+# --- Node private key ---------------------------------------------------------
+
+- name: Generate node private key (ECC)
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_tls_key_file }}"
+    type: ECC
+    curve: "{{ vault_tls_cert_curve }}"
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "{{ vault_tls_key_mode }}"
+  when: vault_tls_cert_key_type == 'ECC'
+  tags: tls
+
+- name: Generate node private key (RSA)
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_tls_key_file }}"
+    type: RSA
+    size: "{{ vault_tls_cert_size }}"
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "{{ vault_tls_key_mode }}"
+  when: vault_tls_cert_key_type == 'RSA'
+  tags: tls
+
+# --- Node CSR (in-memory pipe) ------------------------------------------------
+
+- name: Generate node CSR (in memory)
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ vault_tls_key_file }}"
+    common_name: "{{ vault_tls_leader_servername }}"
+    subject_alt_name: "{{ __vault_tls_sans }}"
+    use_common_name_for_san: false
+    extended_key_usage:
+      - serverAuth
+      - clientAuth
+    basic_constraints:
+      - "CA:FALSE"
+  register: __vault_node_csr
+  changed_when: false
+  tags: tls
+
+# --- Idempotency check --------------------------------------------------------
+# Inspect the existing node cert (if any) so we can skip signing when the cert
+# is still valid and already carries all required SANs.
+
+- name: Check existing node certificate info
+  community.crypto.x509_certificate_info:
+    path: "{{ vault_tls_cert_file }}"
+    valid_at:
+      check: "+30d"
+  register: __vault_existing_cert
+  failed_when: false
+  changed_when: false
+  tags: tls
+
+- name: Determine whether node certificate needs (re)generation
+  ansible.builtin.set_fact:
+    __vault_regen_cert: >-
+      {{
+        __vault_existing_cert['failed'] | default(true)
+        or not __vault_existing_cert.get('valid_at', {}).get('check', false)
+        or (
+          __vault_tls_sans | map('regex_replace', '^(DNS|IP):', '') | list
+          | difference(
+              ((__vault_existing_cert.get('subject_alt_name', []) | default([]))
+               | map('regex_replace', '^(DNS:|IP Address:)', '') | list)
+            )
+          | length > 0
+        )
+      }}
+  tags: tls
+
+# --- Node certificate (ownca signed) -----------------------------------------
+
+- name: Sign node certificate with role CA
+  community.crypto.x509_certificate:
+    path: "{{ vault_tls_cert_file }}"
+    csr_content: "{{ __vault_node_csr['csr'] }}"
+    ownca_path: "{{ vault_tls_ca_file }}"
+    ownca_privatekey_path: "{{ vault_tls_dir }}/vault-ca-key.pem"
+    provider: ownca
+    ownca_not_before: "-1d"
+    ownca_not_after: "{{ vault_tls_cert_validity }}"
+    owner: root
+    group: root
+    mode: "{{ vault_tls_cert_mode }}"
+  when: __vault_regen_cert | bool
+  notify: reload vault
+  tags: tls

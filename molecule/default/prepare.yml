@@ -1,0 +1,17 @@
+---
+# Prepare the container before the role runs.
+# Install Python and gather facts; no Vault-specific setup here — the role
+# installs Vault itself via the package method.
+
+- name: Prepare default container
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Bootstrap Python (Debian/Ubuntu)
+      ansible.builtin.raw: >-
+        apt-get update -qq &&
+        apt-get install -y -qq --no-install-recommends python3 python3-apt
+      changed_when: true
+
+    - name: Gather facts after bootstrap
+      ansible.builtin.setup:

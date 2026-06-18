@@ -1,5 +1,152 @@
 ---
-# Phase 2+ implementation placeholder.
-- name: "Install binary tasks placeholder"
-  ansible.builtin.debug:
-    msg: "Placeholder - implemented in a later phase"
+# ==============================================================================
+# Install Vault from a GPG-verified binary zip (air-gapped / version-pinned)
+# ==============================================================================
+
+# Build the canonical download filename once so all tasks below stay DRY.
+- name: Set binary download facts
+  ansible.builtin.set_fact:
+    __vault_zip_name: "vault_{{ vault_version }}_linux_{{ vault_arch }}.zip"
+    __vault_tmpdir: "/tmp/vault-install-{{ vault_version }}"
+  tags: install
+
+- name: Create temporary download directory
+  ansible.builtin.file:
+    path: "{{ __vault_tmpdir }}"
+    state: directory
+    mode: "0700"
+  tags: install
+
+# Fetch the three artefacts in sequence; get_url is idempotent (checksum guard).
+- name: Download Vault binary zip
+  ansible.builtin.get_url:
+    url: "{{ vault_binary_base_url }}/{{ vault_version }}/{{ __vault_zip_name }}"
+    dest: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
+    mode: "0600"
+    force: false
+  tags: install
+
+- name: Download Vault SHA256SUMS
+  ansible.builtin.get_url:
+    url: "{{ vault_binary_base_url }}/{{ vault_version }}/vault_{{ vault_version }}_SHA256SUMS"
+    dest: "{{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS"
+    mode: "0600"
+    force: false
+  tags: install
+
+- name: Download Vault SHA256SUMS.sig
+  ansible.builtin.get_url:
+    url: "{{ vault_binary_base_url }}/{{ vault_version }}/vault_{{ vault_version }}_SHA256SUMS.sig"
+    dest: "{{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS.sig"
+    mode: "0600"
+    force: false
+  when: vault_binary_verify_gpg | bool
+  tags: install
+
+- name: Download HashiCorp PGP public key
+  ansible.builtin.get_url:
+    url: "{{ vault_binary_gpg_key_url }}"
+    dest: "{{ __vault_tmpdir }}/hashicorp.pgp"
+    mode: "0600"
+    force: false
+  when: vault_binary_verify_gpg | bool
+  tags: install
+
+- name: Import HashiCorp PGP key into ephemeral keyring
+  ansible.builtin.command: >-
+    gpg --batch --no-default-keyring
+    --keyring {{ __vault_tmpdir }}/hashicorp.gpg
+    --import {{ __vault_tmpdir }}/hashicorp.pgp
+  changed_when: false
+  when: vault_binary_verify_gpg | bool
+  tags: install
+
+- name: Verify SHA256SUMS signature
+  ansible.builtin.command: >-
+    gpg --batch --no-default-keyring
+    --keyring {{ __vault_tmpdir }}/hashicorp.gpg
+    --verify {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS.sig
+    {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
+  changed_when: false
+  when: vault_binary_verify_gpg | bool
+  tags: install
+
+# Verify the zip checksum against the signed SHA256SUMS file.
+# We extract only the line for this architecture's zip.
+- name: Read expected checksum for this zip from SHA256SUMS
+  ansible.builtin.command: >-
+    grep -E "^[0-9a-f]+\s+{{ __vault_zip_name }}$"
+    {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
+  register: __vault_expected_checksum_line
+  changed_when: false
+  tags: install
+
+- name: Set expected SHA256 checksum fact
+  ansible.builtin.set_fact:
+    __vault_expected_sha256: "{{ __vault_expected_checksum_line['stdout'].split()[0] }}"
+  tags: install
+
+- name: Verify zip checksum matches SHA256SUMS
+  ansible.builtin.command: >-
+    sha256sum -c --ignore-missing
+    {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
+  args:
+    chdir: "{{ __vault_tmpdir }}"
+  changed_when: false
+  tags: install
+
+# --- Create vault system group and user (binary path only) --------------------
+
+- name: Create vault system group
+  ansible.builtin.group:
+    name: "{{ vault_group }}"
+    system: true
+    state: present
+  tags: install
+
+- name: Create vault system user
+  ansible.builtin.user:
+    name: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+    home: /opt/vault
+    state: present
+  tags: install
+
+# --- Extract binary -----------------------------------------------------------
+# Idempotency: check existing binary version before extracting.
+
+- name: Check current installed binary version
+  ansible.builtin.command: "{{ vault_bin_path }} version"
+  register: __vault_installed_version
+  changed_when: false
+  failed_when: false
+  tags: install
+
+- name: Extract Vault binary to /usr/local/bin
+  ansible.builtin.unarchive:
+    src: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
+    dest: /usr/local/bin
+    remote_src: true
+    include:
+      - vault
+    mode: "0755"
+    owner: root
+    group: root
+  when: >-
+    __vault_installed_version['rc'] != 0 or
+    vault_version not in __vault_installed_version['stdout']
+  notify:
+    - reload systemd daemon
+    - restart vault
+  tags: install
+
+# --- Clean up temp directory --------------------------------------------------
+
+- name: Remove temporary download directory
+  ansible.builtin.file:
+    path: "{{ __vault_tmpdir }}"
+    state: absent
+  tags: install

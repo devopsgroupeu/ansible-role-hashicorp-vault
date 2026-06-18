@@ -1,0 +1,98 @@
+---
+# Verify the default scenario: Vault is installed, configured, and the TLS
+# listener is up. Vault is uninitialized/sealed (Phase 3 scope); the health
+# endpoint returns HTTP 501 which confirms TLS is working.
+
+- name: Verify Vault installation and TLS listener
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    # --- Service checks -------------------------------------------------------
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert vault.service is running and enabled
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['services']['vault.service'] is defined
+          - ansible_facts['services']['vault.service']['state'] == 'running'
+          - ansible_facts['services']['vault.service']['status'] == 'enabled'
+        fail_msg: "vault.service is not running or not enabled"
+        success_msg: "vault.service is running and enabled"
+
+    # --- Config file checks ---------------------------------------------------
+
+    - name: Stat vault.hcl
+      ansible.builtin.stat:
+        path: /etc/vault.d/vault.hcl
+      register: __verify_vault_hcl
+
+    - name: Assert vault.hcl exists
+      ansible.builtin.assert:
+        that: __verify_vault_hcl['stat']['exists']
+        fail_msg: "/etc/vault.d/vault.hcl not found"
+        success_msg: "/etc/vault.d/vault.hcl exists"
+
+    - name: Stat TLS cert file
+      ansible.builtin.stat:
+        path: /opt/vault/tls/vault-cert.pem
+      register: __verify_vault_cert
+
+    - name: Assert TLS cert file exists
+      ansible.builtin.assert:
+        that: __verify_vault_cert['stat']['exists']
+        fail_msg: "/opt/vault/tls/vault-cert.pem not found"
+        success_msg: "TLS cert file exists"
+
+    # --- TLS listener health check --------------------------------------------
+    # Vault running uninitialized returns HTTP 501 on /v1/sys/health.
+    # This proves the TLS listener is answering with our generated cert.
+    # validate_certs=false because the CA is self-signed and not in the
+    # system trust store (vault_tls_install_ca_to_trust_store=false in converge).
+
+    - name: Wait for Vault TLS listener to become ready
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 8200
+        timeout: 30
+        state: started
+
+    - name: Query Vault health endpoint (expect 501 = not initialized)
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:8200/v1/sys/health"
+        method: GET
+        validate_certs: false
+        status_code:
+          - 200
+          - 429
+          - 472
+          - 473
+          - 501
+          - 503
+        return_content: true
+      register: __verify_vault_health
+      retries: 5
+      delay: 3
+
+    - name: Assert Vault health returns 501 (not initialized, listener up)
+      ansible.builtin.assert:
+        that:
+          - __verify_vault_health['status'] == 501
+        fail_msg: >-
+          Expected HTTP 501 (Vault not initialized) but got
+          {{ __verify_vault_health['status'] }}. TLS listener may not be up.
+        success_msg: "Vault TLS listener is up and returns 501 (not initialized)"
+
+    - name: Assert Vault binary is on PATH
+      ansible.builtin.command: vault version
+      register: __verify_vault_version
+      changed_when: false
+
+    - name: Assert Vault binary returns version string
+      ansible.builtin.assert:
+        that:
+          - "'Vault' in __verify_vault_version['stdout']"
+        fail_msg: "Vault binary not working or missing version output"
+        success_msg: "Vault binary is functional"

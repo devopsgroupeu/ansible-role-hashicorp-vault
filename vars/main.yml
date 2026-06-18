@@ -5,11 +5,13 @@
 # ==============================================================================
 
 # Package dependencies required before Vault installation.
+# python3-debian is required by ansible.builtin.deb822_repository on Debian/Ubuntu.
 __vault_pkg_deps:
   Debian:
     - ca-certificates
     - gpg
     - wget
+    - python3-debian
   RedHat:
     - ca-certificates
     - gnupg2

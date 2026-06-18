@@ -1,5 +1,62 @@
 ---
-# Phase 2+ implementation placeholder.
-- name: "Tls tasks placeholder"
-  ansible.builtin.debug:
-    msg: "Placeholder - implemented in a later phase"
+# ==============================================================================
+# TLS: generate (community.crypto ownca) or validate BYO + OS trust store
+# ==============================================================================
+
+# Dispatch: generated certs vs. BYO
+- name: Generate TLS certificates via community.crypto
+  ansible.builtin.include_tasks: tls_generate.yml
+  when: vault_tls_generate_certs | bool
+  tags: tls
+
+- name: Validate and permission BYO TLS certificates
+  ansible.builtin.include_tasks: tls_byo.yml
+  when: not vault_tls_generate_certs | bool
+  tags: tls
+
+# --- OS trust store -----------------------------------------------------------
+# Install the role CA (generated or BYO) into the OS trust store.
+# Skipped in render-only mode (vault_config_only=true) because the package
+# tools may not be present in that stripped container environment.
+
+- name: Install CA into OS trust store (Debian/Ubuntu)
+  when:
+    - vault_tls_install_ca_to_trust_store | bool
+    - not vault_config_only | bool
+    - ansible_facts['os_family'] == 'Debian'
+  tags: tls
+  block:
+    - name: Copy CA to Debian trust store directory
+      ansible.builtin.copy:
+        src: "{{ vault_tls_ca_file }}"
+        dest: "{{ __vault_ca_trust_dir['Debian'] }}/vault-ca.crt"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      register: __vault_ca_debian
+
+    - name: Update Debian CA trust store
+      ansible.builtin.command: "{{ __vault_ca_trust_update_cmd['Debian'] }}"
+      changed_when: __vault_ca_debian is changed
+
+- name: Install CA into OS trust store (RHEL/EL)
+  when:
+    - vault_tls_install_ca_to_trust_store | bool
+    - not vault_config_only | bool
+    - ansible_facts['os_family'] == 'RedHat'
+  tags: tls
+  block:
+    - name: Copy CA to RHEL trust store directory
+      ansible.builtin.copy:
+        src: "{{ vault_tls_ca_file }}"
+        dest: "{{ __vault_ca_trust_dir['RedHat'] }}/vault-ca.crt"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      register: __vault_ca_rhel
+
+    - name: Update RHEL CA trust store
+      ansible.builtin.command: "{{ __vault_ca_trust_update_cmd['RedHat'] }}"
+      changed_when: __vault_ca_rhel is changed

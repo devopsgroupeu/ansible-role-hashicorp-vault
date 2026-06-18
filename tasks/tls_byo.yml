@@ -1,0 +1,75 @@
+---
+# ==============================================================================
+# BYO TLS: validate presence and enforce correct permissions on operator-supplied
+# certificate, key, and CA files.
+# ==============================================================================
+
+- name: Stat BYO TLS cert file
+  ansible.builtin.stat:
+    path: "{{ vault_tls_cert_file }}"
+  register: __vault_byo_cert
+  tags: tls
+
+- name: Assert BYO TLS cert file exists
+  ansible.builtin.assert:
+    that: __vault_byo_cert['stat']['exists']
+    fail_msg: >-
+      vault_tls_generate_certs is false but vault_tls_cert_file does not exist
+      on the target host: {{ vault_tls_cert_file }}
+    quiet: true
+  tags: tls
+
+- name: Stat BYO TLS key file
+  ansible.builtin.stat:
+    path: "{{ vault_tls_key_file }}"
+  register: __vault_byo_key
+  tags: tls
+
+- name: Assert BYO TLS key file exists
+  ansible.builtin.assert:
+    that: __vault_byo_key['stat']['exists']
+    fail_msg: >-
+      vault_tls_generate_certs is false but vault_tls_key_file does not exist
+      on the target host: {{ vault_tls_key_file }}
+    quiet: true
+  tags: tls
+
+- name: Stat BYO CA file
+  ansible.builtin.stat:
+    path: "{{ vault_tls_ca_file }}"
+  register: __vault_byo_ca
+  tags: tls
+
+- name: Assert BYO CA file exists
+  ansible.builtin.assert:
+    that: __vault_byo_ca['stat']['exists']
+    fail_msg: >-
+      vault_tls_generate_certs is false but vault_tls_ca_file does not exist
+      on the target host: {{ vault_tls_ca_file }}
+    quiet: true
+  tags: tls
+
+# Enforce correct permissions regardless of how the files were placed.
+- name: Set permissions on BYO TLS key file (root:vault 0640)
+  ansible.builtin.file:
+    path: "{{ vault_tls_key_file }}"
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "{{ vault_tls_key_mode }}"
+  tags: tls
+
+- name: Set permissions on BYO TLS cert file (root:root 0644)
+  ansible.builtin.file:
+    path: "{{ vault_tls_cert_file }}"
+    owner: root
+    group: root
+    mode: "{{ vault_tls_cert_mode }}"
+  tags: tls
+
+- name: Set permissions on BYO CA file (root:root 0644)
+  ansible.builtin.file:
+    path: "{{ vault_tls_ca_file }}"
+    owner: root
+    group: root
+    mode: "{{ vault_tls_cert_mode }}"
+  tags: tls
