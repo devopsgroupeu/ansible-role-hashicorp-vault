@@ -89,12 +89,20 @@ roles:
         vault_seal_type: transit
         vault_seal_transit_address: "https://unsealer.example.internal:8200"
         vault_seal_transit_key_name: autounseal
-        vault_seal_transit_token: "{{ vault_transit_token }}"   # from Ansible Vault
+        vault_seal_transit_token: "{{ vault_seal_transit_token }}"   # from Ansible Vault
+        # With auto-unseal, init returns recovery keys (not Shamir unseal keys).
+        # Recovery keys gate root-token generation and rekey only.
+        vault_init_recovery_shares: 5
+        vault_init_recovery_threshold: 3
         vault_init_encrypt_output: true
         vault_init_encrypt_password_file: "~/.vault-pass"
 ```
 
-See `examples/` for complete playbooks.
+See `examples/autounseal_transit.yml` for the complete playbook including the
+required unsealer Vault pre-requisites (transit enable, key creation, policy, and
+orphan periodic token creation).
+
+See `examples/` for all complete playbooks.
 
 ---
 
@@ -133,6 +141,11 @@ the default) or enable role-generated self-signed certs for dev/test only. The
 `vault_tls_leader_servername` value **must be a DNS SAN** on every node's certificate
 (CN matching was removed in Go 1.17); a mismatch causes an explicit x509 handshake
 error during `retry_join`.
+
+**Generated-cert mode (`vault_tls_generate_certs: true`) replicates the CA private
+key to every node in the play.** This simplifies dev/test setups but means the CA
+private key leaves the controller. Use BYO certificates (`vault_tls_generate_certs:
+false`, the default) for all production deployments.
 
 ### Init output
 

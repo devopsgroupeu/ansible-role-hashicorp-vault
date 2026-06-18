@@ -14,16 +14,60 @@
 #     vault2 ansible_host=192.0.2.12
 #     vault3 ansible_host=192.0.2.13
 #
-# Security notes:
-#   - The transit token MUST be an orphan periodic token with no max TTL.
-#     A non-periodic token expiring while all nodes are down = permanent lock-out.
-#     Create it on the unsealer cluster:
-#       vault token create \
-#         -orphan \
-#         -policy=autounseal \
-#         -period=24h \
-#         -display-name=vault-autounseal
-#   - Store the token in Ansible Vault and pass it via vault_transit_token below.
+# ==============================================================================
+# Unsealer Vault pre-requisites
+# Run these once on the UNSEALER Vault cluster before executing this playbook.
+# ==============================================================================
+#
+# 1. Enable the transit secrets engine (if not already enabled):
+#      vault secrets enable transit
+#
+# 2. Create the transit encryption key used for auto-unseal:
+#      vault write -f transit/keys/autounseal
+#
+# 3. Create a policy that allows the sealed cluster to encrypt/decrypt via
+#    the transit key. Save the following HCL as autounseal-policy.hcl:
+#
+#      path "transit/encrypt/autounseal" {
+#        capabilities = ["update"]
+#      }
+#      path "transit/decrypt/autounseal" {
+#        capabilities = ["update"]
+#      }
+#
+#    Then apply the policy:
+#      vault policy write autounseal autounseal-policy.hcl
+#
+# 4. Create an orphan periodic token with no max TTL for the sealed cluster:
+#      vault token create \
+#        -orphan \
+#        -policy=autounseal \
+#        -period=24h \
+#        -display-name=vault-autounseal
+#
+#    Store the resulting token value (no_log) in Ansible Vault-encrypted
+#    group_vars and pass it as vault_seal_transit_token.
+#    A non-periodic or max-TTL-capped token expiring while all nodes are
+#    down = permanent auto-unseal lock-out.
+#
+# ==============================================================================
+# BYO TLS pre-requisites (production default: vault_tls_generate_certs: false)
+# ==============================================================================
+#
+# Place TLS material at vault_tls_{cert,key,ca}_file paths on all nodes before
+# running this playbook (or use a separate play to distribute from a secrets
+# manager). The certificate must carry:
+#   - DNS:vault.cluster.internal  (== vault_tls_leader_servername)
+#   - DNS:<inventory_hostname>    for each node
+#   - IP:<node_ip>                for each node
+#   - IP:127.0.0.1
+# and extended_key_usage must include both serverAuth and clientAuth
+# (Raft mTLS uses the API cert for cluster join).
+#
+# ==============================================================================
+# Security notes
+# ==============================================================================
+#
 #   - With auto-unseal, init returns RECOVERY KEYS (not unseal keys). Recovery
 #     keys cannot unseal the cluster if the KMS (unsealer) is unavailable; they
 #     only gate root-token generation and rekey. KMS key deletion = permanent loss.
@@ -34,16 +78,12 @@
 #     --vault-password-file ~/.vault-pass
 #
 # group_vars/vault/vault.yml (ansible-vault encrypted):
-#   vault_transit_token: "s.ACTUAL_TOKEN_HERE"
+#   vault_seal_transit_token: "s.ACTUAL_TOKEN_HERE"
 
 - name: Deploy Vault cluster with Transit auto-unseal
   hosts: vault
   become: true
   gather_facts: true
-  vars:
-    # Load the transit token from Ansible Vault-encrypted group_vars.
-    # This variable must be defined externally; it is referenced below with no_log.
-    vault_transit_token: "{{ vault_transit_token | default('') }}"
   roles:
     - role: devopsgroupeu.hashicorp_vault
       vars:
@@ -60,13 +100,16 @@
         vault_seal_transit_key_name: "autounseal"
         vault_seal_transit_mount_path: "transit/"
         # Token delivered via vault.env (no_log); never written into vault.hcl.
-        # Use an orphan periodic token — see security notes above.
-        vault_seal_transit_token: "{{ vault_transit_token }}"
+        # Load from Ansible Vault-encrypted group_vars/vault/vault.yml.
+        # See unsealer pre-requisites above for how to create the token.
+        vault_seal_transit_token: "{{ vault_seal_transit_token }}"
         # Optional: CA for verifying the unsealer Vault TLS cert.
         # vault_seal_transit_tls_ca_cert: "/etc/ssl/certs/unsealer-ca.pem"
 
         # ---- Init / unseal ------------------------------------------------------
         # With transit auto-unseal, Vault returns recovery keys (not unseal keys).
+        # Recovery keys gate root-token generation and rekey only — they cannot
+        # unseal the cluster if the KMS (unsealer) is unavailable.
         vault_init_recovery_shares: 5
         vault_init_recovery_threshold: 3
         vault_init_encrypt_output: true

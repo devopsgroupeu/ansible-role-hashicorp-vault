@@ -73,7 +73,7 @@ is prefixed `vault_`.
 TLS is **on by default** (`vault_tls_enabled: true`). Two modes:
 
 - **BYO (production default, `vault_tls_generate_certs: false`):** supply cert/key/CA at the configured paths before running the role.
-- **Generated (dev/test, `vault_tls_generate_certs: true`):** role builds a CA + per-node cert via `community.crypto` ownca.
+- **Generated (dev/test, `vault_tls_generate_certs: true`):** role builds a CA + per-node cert via `community.crypto` ownca. **The CA private key is replicated to every node in the play — use BYO certs in production.**
 
 > **SAN requirement:** `vault_tls_leader_servername` must be a **DNS SAN** on every
 > node's certificate (CN matching was removed in Go 1.17). Mismatch = explicit x509
@@ -261,9 +261,16 @@ token from the init output (`vault_init_output_path`).
 
 - **`become: true` required at the play level.** The role does not set `become`
   on individual tasks; the consuming play must declare `become: true`.
-- **BYO TLS file existence is checked at runtime.** If `vault_tls_generate_certs: false`
+- **BYO TLS file existence is checked in the `tls` stage.** If `vault_tls_generate_certs: false`
   (the default) and the cert/key/CA files do not exist at the configured paths, the
-  role fails early in the `validate` stage.
-- **Handlers require play-level `become: true`.** The daemon-reload and restart
-  handlers call `ansible.builtin.systemd` which requires root. They will silently
-  fail if `become` is not set at the play level.
+  role fails with an explicit `assert` in `tls_byo.yml` (which runs during the `tls`
+  stage, after install). The check confirms that the files are present on the target
+  host before Vault attempts to start.
+- **Handlers raise a hard error if `become` is not set at the play level.**
+  The daemon-reload and restart handlers call `ansible.builtin.systemd` which
+  requires root; the task will fail with a permission error if `become: true` is
+  absent from the consuming play.
+- **Generated-cert mode replicates the CA private key to every node.** When
+  `vault_tls_generate_certs: true`, the role-generated CA private key is copied to
+  every node in the play. This is acceptable for dev/test; for production use BYO
+  certificates (`vault_tls_generate_certs: false`, the default).

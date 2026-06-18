@@ -8,12 +8,13 @@ Common issues and resolutions for the `devopsgroupeu.hashicorp_vault` role.
 
 - [Sealed cluster recovery](#sealed-cluster-recovery)
 - [Auto-unseal: recovery keys cannot unseal — KMS down](#auto-unseal-recovery-keys-cannot-unseal--kms-down)
+- [Transit auto-unseal: token expired or revoked](#transit-auto-unseal-token-expired-or-revoked)
 - [TLS / x509 / SAN errors](#tls--x509--san-errors)
 - [mlock and swap](#mlock-and-swap)
 - [SIGHUP reload race](#sighup-reload-race)
 - [Raft join failures](#raft-join-failures)
 - [Package vs binary path issues](#package-vs-binary-path-issues)
-- [Init output not written / encryption fails](#init-output-not-written--encryption-fails)
+- [Init output written unencrypted / encryption skipped](#init-output-written-unencrypted--encryption-skipped)
 - [Useful commands](#useful-commands)
 
 ---
@@ -69,6 +70,13 @@ With auto-unseal (`vault_seal_type: transit|awskms|azurekeyvault|gcpckms`), Vaul
 - Protect the KMS key with deletion protection / soft-delete where available.
 - For AWS KMS: enable key deletion waiting period (7–30 days).
 - For Azure Key Vault: enable soft-delete and purge protection.
+- For GCP Cloud KMS: key-version destruction is scheduled (default 24-hour delay
+  before permanent deletion). Increase the scheduled duration to at least 30 days.
+  Consider enforcing the `constraints/cloudkms.disableBeforeDestroy` organisation
+  policy to prevent accidental key destruction. Monitor all KMS operations with
+  Cloud Audit Logs to receive early warning of key state changes.
+  **Recovery keys cannot reconstruct the encryption key if the Cloud KMS key is
+  destroyed — this is permanent, unrecoverable cluster loss.**
 - For Transit (Vault-to-Vault): keep the unsealer Vault cluster healthy; back up its
   storage.
 - Test your KMS recovery procedure before it is needed in production.
@@ -76,6 +84,59 @@ With auto-unseal (`vault_seal_type: transit|awskms|azurekeyvault|gcpckms`), Vaul
 **If the KMS is temporarily unavailable** and all Vault nodes restart, the cluster
 is sealed and cannot be unsealed until the KMS is restored. Vault nodes are
 **read-only** while sealed — no writes or new leases.
+
+---
+
+## Transit auto-unseal: token expired or revoked
+
+**Symptom:** After a node restart (or all nodes restarting), Vault does not
+auto-unseal. The service starts but remains sealed with errors such as
+`error performing token check` or `transit seal: error decrypting wrapping key`
+in the logs.
+
+**Diagnosis:**
+
+```bash
+# On the affected node, inspect the Vault service logs for transit seal errors
+journalctl -u vault -n 100 --no-pager | grep -iE 'transit|seal|token|auth'
+```
+
+Look for messages indicating that the token used for the transit seal is invalid,
+expired, has been revoked, or has reached its max TTL.
+
+**Cause:** The transit unsealer token stored in `vault.env` (the `VAULT_TOKEN`
+passed to the transit seal stanza) has expired or been revoked on the unsealer
+Vault cluster. Vault cannot decrypt its wrapping key without a valid token.
+
+**Remediation:**
+
+1. On the unsealer Vault cluster, create a new orphan periodic token:
+
+   ```bash
+   vault token create \
+     -orphan \
+     -policy=autounseal \
+     -period=24h \
+     -display-name=vault-autounseal
+   ```
+
+2. Update the token in the secrets source used to populate `vault.env` on the
+   sealed cluster (e.g. re-encrypt with Ansible Vault and update the group variable,
+   or update the external secret). The token must land in `vault.env` as the value
+   supplied to `vault_seal_transit_token`.
+
+3. Re-run the role (or manually edit `{{ vault_config_dir }}/vault.env` on each
+   node), then restart the Vault service:
+
+   ```bash
+   systemctl restart vault
+   vault status
+   ```
+
+**Prevention:** Use an orphan periodic token with `period=24h` and **no max TTL**.
+A non-periodic token or a token with `max_ttl` set will eventually expire even if
+auto-renewed. Set `vault_seal_transit_disable_renewal: false` (the default) to keep
+Vault auto-renewing the token while the service runs.
 
 ---
 
@@ -202,26 +263,40 @@ instead of `setcap` to survive binary replacements.
 
 ---
 
-## Init output not written / encryption fails
+## Init output written unencrypted / encryption skipped
 
-**Symptom:** No init file appears at `vault_init_output_path`, or
-`ansible-vault encrypt` fails with:
+**Symptom:** The init file appears at `vault_init_output_path` (mode `0600`) but
+is stored as plaintext JSON rather than `ansible-vault`-encrypted ciphertext. The
+play emits a debug warning:
+
 ```
-ERROR! A vault password is required to use Ansible Vault
+vault_init_encrypt_output is true but vault_init_encrypt_password_file is
+not set — the init file at <path> is stored plaintext (mode 0600) on the
+Ansible controller. Set vault_init_encrypt_password_file to a password file
+path to enable ansible-vault encryption.
 ```
 
-**Cause:** `vault_init_encrypt_output: true` but `vault_init_encrypt_password_file`
-is empty. The role skips encryption (with a warning) to avoid hanging unattended runs.
+**Cause:** `vault_init_encrypt_output: true` (the default) but
+`vault_init_encrypt_password_file` is empty (also the default). When no password
+file path is provided, the role deliberately skips the `ansible-vault encrypt` step
+and emits the debug warning rather than hanging an unattended run waiting for an
+interactive password prompt.
 
-**Fix:** provide the password file path:
+The init file **is** written (mode `0600`, owner of the Ansible controller process)
+— only encryption is skipped.
+
+**Fix:** provide the password file path to enable encryption:
 ```yaml
 vault_init_encrypt_password_file: "~/.vault-pass"
 ```
 
-Or disable encryption for ephemeral/test runs:
+Or, for ephemeral/test runs where you accept plaintext storage:
 ```yaml
 vault_init_encrypt_output: false
 ```
+
+Regardless of the encryption setting, **never commit the init file** — it contains
+unseal keys (Shamir) or recovery keys plus the initial root token.
 
 ---
 
