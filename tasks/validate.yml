@@ -1,0 +1,158 @@
+---
+# ============================================================================
+# Variable validation — runs at start of every play (tag: always)
+# ============================================================================
+
+- name: Validate vault_install_method choice
+  ansible.builtin.assert:
+    that:
+      - vault_install_method in ['package', 'binary']
+    fail_msg: >-
+      vault_install_method '{{ vault_install_method }}' is not valid.
+      Must be one of: package, binary.
+    quiet: true
+  tags: always
+
+- name: Validate vault_seal_type choice
+  ansible.builtin.assert:
+    that:
+      - vault_seal_type in ['shamir', 'transit', 'awskms', 'azurekeyvault', 'gcpckms']
+    fail_msg: >-
+      vault_seal_type '{{ vault_seal_type }}' is not valid.
+      Must be one of: shamir, transit, awskms, azurekeyvault, gcpckms.
+    quiet: true
+  tags: always
+
+- name: Validate vault_tls_min_version choice
+  ansible.builtin.assert:
+    that:
+      - vault_tls_min_version in ['tls12', 'tls13']
+    fail_msg: >-
+      vault_tls_min_version '{{ vault_tls_min_version }}' is not valid.
+      Must be one of: tls12, tls13.
+    quiet: true
+  tags: always
+
+- name: Validate vault_tls_max_version choice
+  ansible.builtin.assert:
+    that:
+      - vault_tls_max_version in ['tls12', 'tls13']
+    fail_msg: >-
+      vault_tls_max_version '{{ vault_tls_max_version }}' is not valid.
+      Must be one of: tls12, tls13.
+    quiet: true
+  tags: always
+
+- name: Validate vault_tls_cert_key_type choice
+  ansible.builtin.assert:
+    that:
+      - vault_tls_cert_key_type in ['ECC', 'RSA']
+    fail_msg: >-
+      vault_tls_cert_key_type '{{ vault_tls_cert_key_type }}' is not valid.
+      Must be one of: ECC, RSA.
+    quiet: true
+  tags: always
+
+- name: Validate vault_storage choice
+  ansible.builtin.assert:
+    that:
+      - vault_storage == 'raft'
+    fail_msg: >-
+      vault_storage '{{ vault_storage }}' is not supported. Only 'raft' is
+      supported by this role.
+    quiet: true
+  tags: always
+
+- name: Validate vault_raft_peers is non-empty
+  ansible.builtin.assert:
+    that:
+      - vault_raft_peers | length > 0
+    fail_msg: >-
+      vault_raft_peers must contain at least one entry. Ensure the 'vault'
+      inventory group exists or set vault_raft_peers explicitly.
+    quiet: true
+  tags: always
+
+- name: Validate vault_init_bootstrap_node is in vault_raft_peers
+  ansible.builtin.assert:
+    that:
+      - vault_init_bootstrap_node in vault_raft_peers
+    fail_msg: >-
+      vault_init_bootstrap_node '{{ vault_init_bootstrap_node }}' is not in
+      vault_raft_peers {{ vault_raft_peers }}. The bootstrap node must be a
+      member of the peer list.
+    quiet: true
+  tags: always
+
+- name: Validate BYO TLS cert files are provided when not generating certs
+  when:
+    - vault_tls_enabled | bool
+    - not vault_tls_generate_certs | bool
+  ansible.builtin.assert:
+    that:
+      - vault_tls_cert_file | length > 0
+      - vault_tls_key_file | length > 0
+      - vault_tls_ca_file | length > 0
+    fail_msg: >-
+      vault_tls_enabled is true and vault_tls_generate_certs is false, but
+      one or more of vault_tls_cert_file / vault_tls_key_file / vault_tls_ca_file
+      is empty. Supply paths to your BYO certificate files, or set
+      vault_tls_generate_certs: true for a role-generated self-signed cert.
+    quiet: true
+  tags: always
+
+- name: Validate transit seal required fields
+  when: vault_seal_type == 'transit'
+  ansible.builtin.assert:
+    that:
+      - vault_seal_transit_address | length > 0
+      - vault_seal_transit_key_name | length > 0
+      - vault_seal_transit_mount_path | length > 0
+      - vault_seal_transit_token | length > 0
+    fail_msg: >-
+      vault_seal_type is 'transit' but one or more required fields are empty.
+      Required: vault_seal_transit_address, vault_seal_transit_key_name,
+      vault_seal_transit_mount_path, vault_seal_transit_token.
+    quiet: true
+  tags: always
+
+- name: Validate AWS KMS seal required fields
+  when: vault_seal_type == 'awskms'
+  ansible.builtin.assert:
+    that:
+      - vault_seal_awskms_kms_key_id | length > 0
+    fail_msg: >-
+      vault_seal_type is 'awskms' but vault_seal_awskms_kms_key_id is empty.
+      Set it to your KMS key ID, ARN, or alias.
+    quiet: true
+  tags: always
+
+- name: Validate Azure Key Vault seal required fields
+  when: vault_seal_type == 'azurekeyvault'
+  ansible.builtin.assert:
+    that:
+      - vault_seal_azurekeyvault_tenant_id | length > 0
+      - vault_seal_azurekeyvault_vault_name | length > 0
+      - vault_seal_azurekeyvault_key_name | length > 0
+    fail_msg: >-
+      vault_seal_type is 'azurekeyvault' but one or more required fields are
+      empty. Required: vault_seal_azurekeyvault_tenant_id,
+      vault_seal_azurekeyvault_vault_name, vault_seal_azurekeyvault_key_name.
+    quiet: true
+  tags: always
+
+- name: Validate GCP CKMS seal required fields
+  when: vault_seal_type == 'gcpckms'
+  ansible.builtin.assert:
+    that:
+      - vault_seal_gcpckms_project | length > 0
+      - vault_seal_gcpckms_region | length > 0
+      - vault_seal_gcpckms_key_ring | length > 0
+      - vault_seal_gcpckms_crypto_key | length > 0
+    fail_msg: >-
+      vault_seal_type is 'gcpckms' but one or more required fields are empty.
+      Required: vault_seal_gcpckms_project, vault_seal_gcpckms_region (key-ring
+      location e.g. 'global'), vault_seal_gcpckms_key_ring,
+      vault_seal_gcpckms_crypto_key.
+    quiet: true
+  tags: always

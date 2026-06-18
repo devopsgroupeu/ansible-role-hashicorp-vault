@@ -1,19 +1,50 @@
+---
 galaxy_info:
   author: DevOpsGroup
   company: DevOpsGroup s.r.o
-  description: Ansible role for installing Hashicorp Vault
-  
+  description: |
+    Production-ready Ansible role for installing and configuring HashiCorp Vault
+    as a TLS-enabled, Raft-integrated-storage HA cluster with idempotent
+    init/unseal (Shamir + auto-unseal), systemd hardening, audit devices,
+    and Prometheus telemetry.
+
   license: Apache-2.0
-  min_ansible_version: 2.15.6
+  min_ansible_version: "2.19"
 
   role_name: hashicorp_vault
-  namespace: devopsgroup
+  namespace: devopsgroupeu
 
   galaxy_tags:
     - hashicorp
     - vault
     - secrets
+    - pki
+    - raft
+    - ha
+    - security
+    - secretsmanagement
+    - keymanagement
+    - encryption
+    - tls
+    - unseal
+    - shamir
+    - autounseal
+    - telemetry
 
-  platforms: []
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+    - name: EL
+      versions:
+        - "9"
 
 dependencies: []
+
+collections:
+  - community.crypto
+  - ansible.posix

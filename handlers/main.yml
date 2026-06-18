@@ -1,2 +1,17 @@
 ---
-# handlers file for postgres
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: "reload systemd daemon"
+
+- name: Restart HashiCorp Vault
+  ansible.builtin.systemd:
+    name: vault
+    state: restarted
+  listen: "restart vault"
+
+- name: Reload HashiCorp Vault
+  ansible.builtin.systemd:
+    name: vault
+    state: reloaded
+  listen: "reload vault"

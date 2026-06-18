@@ -1,28 +1,34 @@
 ---
-- name: Setup certifcates
-  ansible.builtin.import_tasks: certs.yml
-  delegate_to: localhost
-  run_once: true
-
-- name: Setup HashiCorp Vault
-  ansible.builtin.import_tasks: setup.yml
-  become: true
+- name: Validate configuration variables
+  ansible.builtin.include_tasks: validate.yml
+  tags: always
 
 - name: Install HashiCorp Vault
-  ansible.builtin.import_tasks: install.yml
-  become: true
+  ansible.builtin.include_tasks: install.yml
+  when: not vault_config_only | bool
+  tags: install
 
-- name: Init and unseal leader node
-  ansible.builtin.import_tasks: init-unseal.yml
-  become: true
-  when: inventory_hostname == 'hashicorptest01'
+- name: Configure HashiCorp Vault
+  ansible.builtin.include_tasks: config.yml
+  tags: config
 
-- name: Join non-leader nodes to the cluster
-  ansible.builtin.import_tasks: join.yml
-  become: true
-  when: inventory_hostname != 'hashicorptest01'
+- name: Manage TLS certificates
+  ansible.builtin.include_tasks: tls.yml
+  tags: tls
 
-- name: Init and unseal non-leader nodes
-  ansible.builtin.import_tasks: init-unseal.yml
-  become: true
-  when: inventory_hostname != 'hashicorptest01'
+- name: Manage vault service
+  ansible.builtin.include_tasks: service.yml
+  when: not vault_config_only | bool
+  tags: service
+
+- name: Initialize and unseal Vault
+  ansible.builtin.include_tasks: init_unseal.yml
+  when: not vault_config_only | bool
+  tags: init_unseal
+
+- name: Enable audit device
+  ansible.builtin.include_tasks: audit.yml
+  when:
+    - not vault_config_only | bool
+    - vault_audit_enabled | bool
+  tags: audit

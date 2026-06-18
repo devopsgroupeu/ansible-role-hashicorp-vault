@@ -6,7 +6,7 @@ rules:
   comments:
     min-spaces-from-content: 1
   octal-values:
-    forbid-implicit-octal: false
+    forbid-implicit-octal: true
     forbid-explicit-octal: true
   braces:
     max-spaces-inside: 1
@@ -35,3 +35,7 @@ rules:
     type: unix
   trailing-spaces: disable
   truthy: disable
+
+ignore: |
+  venv/
+  .git/

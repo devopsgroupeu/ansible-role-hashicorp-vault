@@ -1,20 +1,382 @@
 ---
-domain_name: "example.com"
-vault_ips:
-  hashicorptest01: ""
-  hashicorptest02: ""
-  hashicorptest03: ""
-vault_instances:
-  hashicorptest01: ""
-  hashicorptest02: ""
-  hashicorptest03: ""
+# ==============================================================================
+# Install
+# ==============================================================================
 
-dependencies:
-  - wget
-  - lsb-release
-  - gpg
-  - openssl
-  - ca-certificates
+# Pinned Vault version for reproducible installs.
+vault_version: "2.0.3"
 
-unseal_keys_dir_output: "{{ playbook_dir }}/unsealKey"
-root_token_dir_output: "{{ playbook_dir }}/rootKey"
+# Installation method: 'package' (default, uses HashiCorp repo) or 'binary'
+# (GPG-verified zip download, useful for air-gapped / version-pinned envs).
+vault_install_method: "package"
+
+# Package name; set to 'vault-enterprise' for the ENT build.
+vault_package_name: "vault"
+
+# APT repository base URL.
+vault_apt_repo_url: "https://apt.releases.hashicorp.com"
+
+# APT repository GPG key URL.
+vault_apt_gpg_key_url: "https://apt.releases.hashicorp.com/gpg"
+
+# RPM repository baseurl (contains $releasever/$basearch).
+vault_rpm_repo_baseurl: "https://rpm.releases.hashicorp.com/RHEL/$releasever/$basearch/stable"
+
+# RPM repository GPG key URL.
+vault_rpm_gpg_key_url: "https://rpm.releases.hashicorp.com/gpg"
+
+# Binary zip download root URL (binary install method).
+vault_binary_base_url: "https://releases.hashicorp.com/vault"
+
+# HashiCorp PGP key URL for verifying SHA256SUMS.sig (binary method).
+vault_binary_gpg_key_url: "https://www.hashicorp.com/.well-known/pgp-key.txt"
+
+# GPG-verify SHA256SUMS.sig before extracting the binary. Set false only in
+# air-gapped environments where you have already verified the checksum offline.
+vault_binary_verify_gpg: true
+
+# CPU architecture string used in repo and binary download paths.
+vault_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+
+# ==============================================================================
+# Paths / users
+# ==============================================================================
+
+# Directory that holds vault.hcl and vault.env.
+vault_config_dir: "/etc/vault.d"
+
+# Raft integrated storage data directory (role creates it).
+vault_data_dir: "/opt/vault/data"
+
+# Directory for TLS material (cert, key, CA).
+vault_tls_dir: "/opt/vault/tls"
+
+# Directory for file audit device log.
+vault_audit_dir: "/opt/vault/audit"
+
+# Service user (package install creates it; binary path creates it via tasks).
+vault_user: "vault"
+
+# Service group.
+vault_group: "vault"
+
+# Vault binary path. Computed from install method in vars; override only when
+# your distro places it elsewhere.
+vault_bin_path: "{{ '/usr/local/bin/vault' if vault_install_method == 'binary' else '/usr/bin/vault' }}"
+
+# ==============================================================================
+# Listener / addresses / UI
+# ==============================================================================
+
+# API listener bind address and port.
+vault_listen_address: "0.0.0.0:8200"
+
+# Raft cluster listener bind address and port.
+vault_cluster_listen_address: "0.0.0.0:8201"
+
+# Advertised API address (https scheme; used by clients and retry_join).
+vault_api_addr: "https://{{ ansible_default_ipv4.address }}:8200"
+
+# Advertised cluster address (https scheme; used for Raft replication).
+vault_cluster_addr: "https://{{ ansible_default_ipv4.address }}:8201"
+
+# Enable the Vault web UI.
+vault_ui: true
+
+# Cluster label emitted in vault.hcl. Empty string = omit from config
+# (Vault auto-generates an internal name).
+vault_cluster_name: ""
+
+# ==============================================================================
+# TLS
+# ==============================================================================
+
+# Enable TLS on the API listener. Disable only for local dev/test; never
+# disable in production.
+vault_tls_enabled: true
+
+# Server certificate file path (full chain PEM).
+vault_tls_cert_file: "{{ vault_tls_dir }}/vault-cert.pem"
+
+# Server private key file path.
+vault_tls_key_file: "{{ vault_tls_dir }}/vault-key.pem"
+
+# CA certificate file path (used by clients and retry_join).
+vault_tls_ca_file: "{{ vault_tls_dir }}/vault-ca.pem"
+
+# Minimum TLS version accepted by the listener.
+vault_tls_min_version: "tls12"
+
+# Maximum TLS version accepted by the listener.
+vault_tls_max_version: "tls13"
+
+# TLS 1.2 cipher suites (emitted ONLY when min==max==tls12; ignored under
+# TLS 1.3). Prefer server-chosen GCM/ChaCha suites; no 3DES.
+vault_tls_cipher_suites: >-
+  TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+
+# Disable mutual TLS (client certificate) verification for API clients.
+# Keep true unless you specifically require mTLS for API consumers.
+vault_tls_disable_client_certs: true
+
+# When true, the role generates a self-signed CA + per-node certificate via
+# community.crypto. Use for dev/test only; supply BYO certs in production.
+vault_tls_generate_certs: false
+
+# Key type for role-generated certificates. 'ECC' (default, P-384) or 'RSA'.
+vault_tls_cert_key_type: "ECC"
+
+# ECC curve for generated certificates.
+vault_tls_cert_curve: "secp384r1"
+
+# RSA key size for generated certificates (used when vault_tls_cert_key_type=RSA).
+vault_tls_cert_size: 4096
+
+# Certificate validity period (ownca not_after syntax).
+# Note: 825 days is only a hard limit on Apple platforms; adjust as needed.
+vault_tls_cert_validity: "+825d"
+
+# Shared DNS SAN that must appear on every node's certificate and matches
+# the leader_tls_servername in retry_join blocks. Must be a DNS SAN (CN
+# matching was removed in Go 1.17).
+vault_tls_leader_servername: "vault.cluster.internal"
+
+# Additional DNS: or IP: SANs to include in role-generated certificates.
+vault_tls_extra_sans: []
+
+# Install the role-generated CA into the OS trust store.
+vault_tls_install_ca_to_trust_store: true
+
+# ==============================================================================
+# Storage (Raft)
+# ==============================================================================
+
+# Storage backend. Only 'raft' (integrated storage) is supported by this role.
+vault_storage: "raft"
+
+# Deterministic Raft node ID. Defaults to inventory_hostname; never use a
+# randomly generated value (causes split-brain on restart).
+vault_raft_node_id: "{{ inventory_hostname }}"
+
+# List of inventory hostnames that form the Vault cluster. Used to render
+# retry_join blocks and to gate init/unseal delegation.
+vault_raft_peers: "{{ groups['vault'] | default([inventory_hostname]) }}"
+
+# Raft performance multiplier. 1 = on-prem LAN tight timing (recommended).
+# Use 5 for cloud/WAN deployments with higher latency.
+vault_raft_performance_multiplier: 1
+
+# Extra key=value pairs injected verbatim into the storage "raft" {} stanza
+# (e.g. autopilot tuning). Dict of {key: value}.
+vault_raft_extra_parameters: {}
+
+# ==============================================================================
+# Seal / auto-unseal
+# ==============================================================================
+
+# Seal type. 'shamir' = default manual unseal; other values configure
+# auto-unseal via the corresponding provider.
+# Choices: shamir | transit | awskms | azurekeyvault | gcpckms
+vault_seal_type: "shamir"
+
+# --- Transit auto-unseal ---
+# Unsealer Vault address (DNS name / VIP; never a node IP for HA).
+vault_seal_transit_address: ""
+
+# Transit encryption key name on the unsealer Vault.
+vault_seal_transit_key_name: "autounseal"
+
+# Transit secrets engine mount path on the unsealer Vault.
+vault_seal_transit_mount_path: "transit/"
+
+# ENT namespace on the unsealer Vault. Empty = omit from config.
+vault_seal_transit_namespace: ""
+
+# CA certificate path for TLS verification of the unsealer Vault.
+vault_seal_transit_tls_ca_cert: ""
+
+# Disable automatic token renewal. Keep false (default) to avoid expiry.
+vault_seal_transit_disable_renewal: false
+
+# Token for the transit unsealer. Delivered via vault.env (no_log); never
+# written into vault.hcl. Use an orphan periodic token with no max TTL.
+vault_seal_transit_token: ""
+
+# --- AWS KMS auto-unseal ---
+vault_seal_awskms_region: "us-east-1"
+vault_seal_awskms_kms_key_id: ""
+# Static AWS credentials (prefer IAM instance role; inject via env instead).
+vault_seal_awskms_access_key: ""
+vault_seal_awskms_secret_key: ""
+
+# --- Azure Key Vault auto-unseal ---
+vault_seal_azurekeyvault_tenant_id: ""
+vault_seal_azurekeyvault_vault_name: ""
+vault_seal_azurekeyvault_key_name: ""
+# Omit client_id/secret when using Managed Service Identity.
+vault_seal_azurekeyvault_client_id: ""
+vault_seal_azurekeyvault_client_secret: ""
+
+# --- GCP CKMS auto-unseal ---
+# Note: vault_seal_gcpckms_region is the key-ring *location* (e.g. 'global'),
+# NOT a compute region.
+vault_seal_gcpckms_project: ""
+vault_seal_gcpckms_region: ""
+vault_seal_gcpckms_key_ring: ""
+vault_seal_gcpckms_crypto_key: ""
+# Path to service account JSON key file; omit on GCE with SA attached.
+vault_seal_gcpckms_credentials: ""
+
+# ==============================================================================
+# Init / unseal
+# ==============================================================================
+
+# Run idempotent Vault initialization (bootstrap node only). Skipped when
+# Vault is already initialized.
+vault_init: true
+
+# Run idempotent Shamir unseal after init. No-op when using auto-unseal
+# (KMS unseals on startup).
+vault_unseal: true
+
+# Number of Shamir key shares to generate.
+vault_init_key_shares: 5
+
+# Minimum number of shares required to reconstruct the master key.
+vault_init_key_threshold: 3
+
+# Recovery key shares (auto-unseal init). Recovery keys gate root-token
+# generation and rekey — they cannot unseal if the KMS is down.
+vault_init_recovery_shares: 5
+
+# Recovery key threshold (auto-unseal init).
+vault_init_recovery_threshold: 3
+
+# Inventory hostname of the bootstrap node where init is delegated.
+# Defaults to the first peer; never hardcode a hostname here.
+vault_init_bootstrap_node: "{{ vault_raft_peers[0] }}"
+
+# Optional list of base64-encoded *binary* PGP public keys (gpg --export <fp>
+# | base64) for encrypting individual unseal/recovery shares. Empty = plaintext
+# shares (protect them with vault_init_encrypt_output).
+vault_init_pgp_keys: []
+
+# Controller-side path where the init JSON is saved (mode 0600).
+# Includes cluster_id so multi-cluster playbooks don't overwrite each other.
+vault_init_output_path: "{{ playbook_dir }}/.vault_init_{{ vault_cluster_id }}.json"
+
+# Encrypt the saved init JSON with 'ansible-vault encrypt' after writing.
+# Strongly recommended when not using PGP keys.
+vault_init_encrypt_output: true
+
+# Stable identifier used in the init output filename. Defaults to the first
+# peer hostname; override to a human-readable cluster name if desired.
+vault_cluster_id: "{{ vault_raft_peers[0] }}"
+
+# ==============================================================================
+# Telemetry / logging / TTLs / hardening
+# ==============================================================================
+
+# Render a telemetry {} stanza in vault.hcl for Prometheus scraping.
+vault_telemetry_enabled: true
+
+# Prometheus metric retention time (Vault internal ring buffer).
+vault_telemetry_prometheus_retention_time: "24h"
+
+# Omit hostname label from metrics for cleaner dashboards.
+vault_telemetry_disable_hostname: true
+
+# Allow unauthenticated /v1/sys/metrics access. Keep false (default) to
+# require a token with read capability on sys/metrics. Note: this option
+# lives inside the listener "tcp" > telemetry {} sub-stanza, not top-level.
+vault_telemetry_unauthenticated_metrics_access: false
+
+# Log verbosity level.
+vault_log_level: "info"
+
+# Log format. 'json' produces structured logs suitable for log aggregators.
+vault_log_format: "json"
+
+# Default lease TTL. Overrides Vault's built-in 768h default.
+vault_default_lease_ttl: "1h"
+
+# Maximum lease TTL. Caps lease renewal duration.
+vault_max_lease_ttl: "24h"
+
+# Required true for Raft integrated storage (BoltDB uses mmap). No
+# deprecation for this setting exists as of Vault 2.0.
+vault_disable_mlock: true
+
+# Disable swap on the target host (swapoff -a + purge fstab entry) to
+# compensate for vault_disable_mlock=true and prevent key material from
+# being written to disk.
+vault_manage_swap: true
+
+# Set VAULT_ENABLE_FILE_PERMISSIONS_CHECK=true in vault.env so Vault itself
+# validates that config/data/tls files have correct permissions on startup.
+vault_enable_file_permissions_check: true
+
+# Free-form extra configuration. Dict of {key: value} rendered into vault.hcl.
+# Use for top-level HCL settings not otherwise covered by this role.
+vault_extra_config: {}
+
+# ==============================================================================
+# Audit
+# ==============================================================================
+
+# Enable a file audit device after Vault is initialized (requires root token).
+vault_audit_enabled: true
+
+# Vault audit device mount path (used with 'vault audit enable -path=…').
+vault_audit_path: "file/"
+
+# Audit log file path on the target host.
+vault_audit_file_path: "{{ vault_audit_dir }}/vault_audit.log"
+
+# Extra options passed to 'vault audit enable' as key=value pairs (dict).
+vault_audit_options: {}
+
+# ==============================================================================
+# systemd / permissions
+# ==============================================================================
+
+# LimitNOFILE for the Vault systemd unit.
+vault_systemd_limit_nofile: 65536
+
+# RestartSec for the Vault systemd unit (seconds).
+vault_systemd_restart_sec: 5
+
+# TimeoutStopSec for the Vault systemd unit (seconds).
+vault_systemd_timeout_stop_sec: 30
+
+# Mode for the config directory (/etc/vault.d).
+vault_config_dir_mode: "0750"
+
+# Mode for config files (vault.hcl, vault.env).
+vault_config_file_mode: "0640"
+
+# Mode for the Raft data directory (/opt/vault/data).
+vault_data_dir_mode: "0750"
+
+# Mode for the TLS private key file (owner root:vault).
+vault_tls_key_mode: "0640"
+
+# Mode for TLS cert and CA files (owner root:root).
+vault_tls_cert_mode: "0644"
+
+# Run restorecon on RHEL-family after creating/modifying files.
+vault_manage_selinux: true
+
+# ==============================================================================
+# Service control
+# ==============================================================================
+
+# Enable the vault.service systemd unit at boot.
+vault_service_enabled: true
+
+# Desired systemd service state after configuration.
+vault_service_state: "started"
+
+# Render-only mode: when true, skip install / service management / init+unseal.
+# Used by the 'render' Molecule scenario to validate templates offline.
+vault_config_only: false

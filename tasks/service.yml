@@ -1,0 +1,5 @@
+---
+# Phase 2+ implementation placeholder.
+- name: "Service tasks placeholder"
+  ansible.builtin.debug:
+    msg: "Placeholder - implemented in a later phase"

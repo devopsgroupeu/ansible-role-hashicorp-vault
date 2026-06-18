@@ -1,2 +1,25 @@
 ---
-# Variables for the devopsgroup.hashicorp_vault role which cant be overridden in the playbook
+# ==============================================================================
+# OS-family internal maps (not overridable by consumers)
+# Prefix __vault_ marks these as internal role variables.
+# ==============================================================================
+
+# Package dependencies required before Vault installation.
+__vault_pkg_deps:
+  Debian:
+    - ca-certificates
+    - gpg
+    - wget
+  RedHat:
+    - ca-certificates
+    - gnupg2
+
+# Directory into which the role-generated CA is installed for OS trust.
+__vault_ca_trust_dir:
+  Debian: "/usr/local/share/ca-certificates"
+  RedHat: "/etc/pki/ca-trust/source/anchors"
+
+# Command to refresh the OS CA trust store after installing the CA cert.
+__vault_ca_trust_update_cmd:
+  Debian: "update-ca-certificates"
+  RedHat: "update-ca-trust"

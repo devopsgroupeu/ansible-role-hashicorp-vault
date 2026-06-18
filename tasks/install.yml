@@ -1,42 +1,10 @@
-- name: Add HashiCorp GPG key
-  ansible.builtin.shell: |
-    wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+---
+# Dispatches to the appropriate install task file based on vault_install_method.
 
-- name: Add HashiCorp repository
-  ansible.builtin.shell: |
-    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
+- name: Install Vault via package manager
+  ansible.builtin.include_tasks: install_package.yml
+  when: vault_install_method == 'package'
 
-- name: Install Vault
-  ansible.builtin.package:
-    name: vault
-    state: present
-    update_cache: yes
-
-- name: Copy TLS certificates to the Vault server
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/certs/{{ item }}"
-    dest: "/opt/vault/tls/{{ item }}"
-    mode: '0644'
-  loop:
-    - "vault.{{ domain_name }}.crt"
-    - "vault.{{ domain_name }}.key"
-
-- name: Configure Vault
-  ansible.builtin.template:
-    src: templates/vault-config.j2
-    dest: "/etc/vault.d/vault.hcl"
-    mode: '0644'
-
-- name: Create new '/opt/vault/data' directory
-  ansible.builtin.file:
-    path: /opt/vault/data
-    state: directory
-    owner: vault
-    group: vault
-    mode: '0755'
-
-- name: Enable and start Vault service
-  ansible.builtin.systemd:
-    name: vault
-    enabled: yes
-    state: started
+- name: Install Vault via binary download
+  ansible.builtin.include_tasks: install_binary.yml
+  when: vault_install_method == 'binary'

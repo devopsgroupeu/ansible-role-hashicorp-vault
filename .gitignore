@@ -1,3 +1,31 @@
+# Python
+venv/
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# IDE / Editor specific files
+.idea/
+.vscode/
+*.swp
+*~
 .cache
-.vscode
-.idea
+
+# macOS specific files
+.DS_Store
+
+# Ansible
+.ansible
+*.retry
+
+# Molecule
+.molecule/
+.cache/
+
+# Init output (contains unseal keys — never commit)
+.vault_init_*.json
+
+# Logs
+*.log
