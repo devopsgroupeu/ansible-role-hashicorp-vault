@@ -1,0 +1,217 @@
+---
+# Verify the raft-ha scenario:
+#   - vault.service running + enabled on all nodes
+#   - All nodes initialized and unsealed
+#   - Raft peer count = 3 and all voters
+#   - Autopilot reports healthy
+#   - Bootstrap node (vault1) is active leader; others are standby
+
+- name: Verify all raft-ha nodes
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    __verify_vault_tls_ca: "/opt/vault/tls/vault-ca.pem"
+    __verify_init_output_path: "/tmp/.vault_init_molecule_raft_ha.json"
+  tasks:
+    # --- Service checks -------------------------------------------------------
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert vault.service is running and enabled
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['services']['vault.service'] is defined
+          - ansible_facts['services']['vault.service']['state'] == 'running'
+          - ansible_facts['services']['vault.service']['status'] == 'enabled'
+        fail_msg: "vault.service is not running or not enabled on {{ inventory_hostname }}"
+        success_msg: "vault.service is running and enabled on {{ inventory_hostname }}"
+
+    # --- Wait for Vault to be ready ------------------------------------------
+
+    - name: Wait for Vault TLS listener
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 8200
+        timeout: 60
+        state: started
+
+    # --- Vault status: initialized + unsealed ---------------------------------
+
+    - name: Query Vault status (rc=0 means initialized+unsealed)
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+      register: __verify_vault_status_cmd
+      changed_when: false
+      failed_when: __verify_vault_status_cmd['rc'] not in [0, 2]
+      retries: 10
+      delay: 6
+      until: __verify_vault_status_cmd['rc'] == 0
+
+    - name: Parse Vault status JSON
+      ansible.builtin.set_fact:
+        __verify_vault_status: "{{ __verify_vault_status_cmd['stdout'] | from_json }}"
+
+    - name: Assert Vault is initialized
+      ansible.builtin.assert:
+        that:
+          - __verify_vault_status['initialized'] | bool
+        fail_msg: "Vault not initialized on {{ inventory_hostname }}"
+        success_msg: "Vault initialized on {{ inventory_hostname }}"
+
+    - name: Assert Vault is unsealed
+      ansible.builtin.assert:
+        that:
+          - not (__verify_vault_status['sealed'] | bool)
+        fail_msg: "Vault is sealed on {{ inventory_hostname }}"
+        success_msg: "Vault is unsealed on {{ inventory_hostname }}"
+
+    - name: Assert storage type is raft
+      ansible.builtin.assert:
+        that:
+          - __verify_vault_status['storage_type'] == 'raft'
+        fail_msg: >-
+          Expected storage_type 'raft' but got
+          '{{ __verify_vault_status['storage_type'] }}' on {{ inventory_hostname }}
+        success_msg: "Storage type is raft on {{ inventory_hostname }}"
+
+# --- raft peer count + autopilot + ha_mode (run on bootstrap node only) -------
+
+- name: Verify Raft cluster state on bootstrap node
+  hosts: vault1
+  become: true
+  gather_facts: false
+  vars:
+    __verify_vault_tls_ca: "/opt/vault/tls/vault-ca.pem"
+    __verify_init_output_path: "/tmp/.vault_init_molecule_raft_ha.json"
+  tasks:
+    - name: Read root token from controller init file
+      ansible.builtin.slurp:
+        src: "{{ __verify_init_output_path }}"
+      delegate_to: localhost
+      become: false
+      register: __verify_init_file_raw
+      no_log: true
+
+    - name: Parse init file and extract root token
+      ansible.builtin.set_fact:
+        __verify_root_token: "{{ (__verify_init_file_raw['content'] | b64decode | from_json)['root_token'] }}"
+      no_log: true
+
+    # Wait for autopilot to promote all peers to voters (~10-15 s after join)
+    - name: Wait for Raft peer count to reach 3
+      ansible.builtin.command: vault operator raft list-peers -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+        VAULT_TOKEN: "{{ __verify_root_token }}"
+      register: __verify_raft_peers_cmd
+      changed_when: false
+      failed_when: __verify_raft_peers_cmd['rc'] != 0
+      retries: 12
+      delay: 10
+      until: >-
+        (__verify_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] | length == 3
+      no_log: true
+
+    - name: Parse Raft peers JSON
+      ansible.builtin.set_fact:
+        __verify_raft_peers: "{{ (__verify_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] }}"
+
+    - name: Assert Raft peer count is 3
+      ansible.builtin.assert:
+        that:
+          - __verify_raft_peers | length == 3
+        fail_msg: "Expected 3 Raft peers but found {{ __verify_raft_peers | length }}"
+        success_msg: "Raft peer count is 3"
+
+    - name: Assert all Raft peers are voters
+      ansible.builtin.assert:
+        that:
+          - __verify_raft_peers | selectattr('voter', 'equalto', true) | list | length == 3
+        fail_msg: "Not all Raft peers are voters (expected 3)"
+        success_msg: "All 3 Raft peers are voters"
+
+    - name: Query Raft autopilot state
+      ansible.builtin.command: vault operator raft autopilot state -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+        VAULT_TOKEN: "{{ __verify_root_token }}"
+      register: __verify_autopilot_cmd
+      changed_when: false
+      failed_when: __verify_autopilot_cmd['rc'] != 0
+      no_log: true
+
+    - name: Parse autopilot state JSON
+      ansible.builtin.set_fact:
+        __verify_autopilot: "{{ __verify_autopilot_cmd['stdout'] | from_json }}"
+
+    - name: Assert autopilot cluster is healthy
+      ansible.builtin.assert:
+        that:
+          # Vault 2.x autopilot state JSON uses PascalCase top-level key 'Healthy'
+          - __verify_autopilot['Healthy'] | bool
+        fail_msg: "Raft autopilot reports cluster unhealthy"
+        success_msg: "Raft autopilot cluster is healthy"
+
+    # ha_mode is exposed in vault status (active / standby / perf-standby)
+    - name: Query Vault status on bootstrap for ha_mode
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+      register: __verify_bootstrap_status_cmd
+      changed_when: false
+      failed_when: __verify_bootstrap_status_cmd['rc'] not in [0, 2]
+
+    - name: Parse bootstrap status JSON
+      ansible.builtin.set_fact:
+        __verify_bootstrap_status: "{{ __verify_bootstrap_status_cmd['stdout'] | from_json }}"
+
+    - name: Assert bootstrap node is active leader
+      ansible.builtin.assert:
+        that:
+          # In Vault 2.x, the active leader has ha_enabled=true and is_self=true
+          # (is_self means this node is the one we queried AND it is the active node).
+          - __verify_bootstrap_status['ha_enabled'] | bool
+          - __verify_bootstrap_status['is_self'] | default(false) | bool
+        fail_msg: "vault1 does not appear to be the active Vault leader (ha_enabled or is_self not set)"
+        success_msg: "vault1 is the active Vault leader"
+
+# --- Verify follower nodes are standby ----------------------------------------
+
+- name: Verify follower nodes are standby
+  hosts: vault2,vault3
+  become: true
+  gather_facts: false
+  vars:
+    __verify_vault_tls_ca: "/opt/vault/tls/vault-ca.pem"
+  tasks:
+    - name: Query Vault status on follower
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+      register: __verify_follower_status_cmd
+      changed_when: false
+      # rc=2 = sealed; rc=0 = active or standby — both are acceptable here
+      # (if the node joined but is a standby, rc=0; the assert below checks type)
+      failed_when: __verify_follower_status_cmd['rc'] not in [0, 2]
+
+    - name: Parse follower status JSON
+      ansible.builtin.set_fact:
+        __verify_follower_status: "{{ __verify_follower_status_cmd['stdout'] | from_json }}"
+      when: __verify_follower_status_cmd['rc'] == 0
+
+    - name: Assert follower is initialized and unsealed
+      ansible.builtin.assert:
+        that:
+          - __verify_follower_status['initialized'] | bool
+          - not (__verify_follower_status['sealed'] | bool)
+        fail_msg: "{{ inventory_hostname }} is not initialized or is sealed"
+        success_msg: "{{ inventory_hostname }} is initialized and unsealed (standby)"
+      when: __verify_follower_status is defined

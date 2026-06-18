@@ -4,6 +4,7 @@ Production-ready Ansible role for installing and configuring **HashiCorp Vault**
 as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 (Shamir + auto-unseal), systemd hardening, audit devices, and Prometheus telemetry.
 
+[![CI](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/actions/workflows/ci.yml/badge.svg)](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/actions/workflows/ci.yml)
 [![Ansible Galaxy](https://img.shields.io/badge/galaxy-devopsgroupeu.hashicorp__vault-blue)](https://galaxy.ansible.com/devopsgroupeu/hashicorp_vault)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -11,26 +12,34 @@ as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 
 ## Requirements
 
-- **Ansible:** 2.19 or later
+- **Ansible:** 2.19 or later (`ansible-core >= 2.19`)
 - **Collections:** `community.crypto >= 3.2.2`, `ansible.posix >= 1.5.0`
-  (install via `ansible-galaxy collection install -r requirements.yml`)
+  Install via: `ansible-galaxy collection install -r requirements.yml`
 - **Target OS:** Ubuntu 24.04 (noble), Debian 12/13 (bookworm/trixie), RHEL/Rocky/Alma 9
 - **Vault version:** 2.0.3 (default; override via `vault_version`)
+- **Docker (Molecule):** required for running tests locally
+- **`become: true` at the play level** — the role does not set `become` per-task
 
 ---
 
 ## Quick start
 
+### Install
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+ansible-galaxy role install devopsgroupeu.hashicorp_vault
+```
+
+Or pin a version from Git:
+
 ```yaml
-# requirements.yml (consuming project)
-collections:
-  - name: community.crypto
-    version: ">=3.2.2"
-  - name: ansible.posix
-    version: ">=1.5.0"
+# requirements.yml
 roles:
   - name: devopsgroupeu.hashicorp_vault
-    version: "1.0.0"
+    src: https://github.com/devopsgroupeu/ansible-role-hashicorp-vault.git
+    version: "v1.0.0"
+    scm: git
 ```
 
 ### Single-node (dev/test — self-signed TLS, Shamir unseal)
@@ -48,7 +57,7 @@ roles:
         vault_init_encrypt_output: false
 ```
 
-### Three-node Raft cluster (production — BYO TLS)
+### Three-node Raft cluster (production — BYO TLS, Shamir)
 
 ```yaml
 - name: Deploy Vault cluster
@@ -57,57 +66,182 @@ roles:
   roles:
     - role: devopsgroupeu.hashicorp_vault
       vars:
-        # BYO certs: place them at vault_tls_{cert,key,ca}_file paths before running
         vault_tls_generate_certs: false
         vault_tls_cert_file: /opt/vault/tls/vault-cert.pem
         vault_tls_key_file: /opt/vault/tls/vault-key.pem
         vault_tls_ca_file: /opt/vault/tls/vault-ca.pem
-        # Seal: Transit auto-unseal (deliver token via vault.env / no_log)
+        vault_init_key_shares: 5
+        vault_init_key_threshold: 3
+        vault_init_encrypt_output: true
+        vault_init_encrypt_password_file: "~/.vault-pass"
+```
+
+### Three-node Raft cluster with Transit auto-unseal
+
+```yaml
+- name: Deploy Vault cluster (auto-unseal)
+  hosts: vault
+  become: true
+  roles:
+    - role: devopsgroupeu.hashicorp_vault
+      vars:
+        vault_tls_generate_certs: false
         vault_seal_type: transit
         vault_seal_transit_address: "https://unsealer.example.internal:8200"
         vault_seal_transit_key_name: autounseal
-        vault_seal_transit_token: "{{ vault_transit_token }}"  # from Ansible Vault
+        vault_seal_transit_token: "{{ vault_transit_token }}"   # from Ansible Vault
+        vault_init_encrypt_output: true
+        vault_init_encrypt_password_file: "~/.vault-pass"
 ```
+
+See `examples/` for complete playbooks.
 
 ---
 
 ## Role variables
 
-Full variable reference with types, defaults, and descriptions is documented in
-**`docs/CONFIGURATION.md`** (available from Phase 5 onward).
+All 107 variables are documented in full in **[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
+Every variable is prefixed `vault_`, declared in `defaults/main.yml`, and validated
+by `meta/argument_specs.yml` (1:1 mapping).
 
-Key variables are declared in `defaults/main.yml` and validated in
-`meta/argument_specs.yml` (1:1 mapping). Every public variable is prefixed `vault_`.
-
-The most important defaults to be aware of:
+Key variables to be aware of:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `vault_version` | `2.0.3` | Pin your desired Vault version |
-| `vault_install_method` | `package` | `package` or `binary` |
-| `vault_tls_enabled` | `true` | TLS on by default — supply certs or set `vault_tls_generate_certs: true` |
-| `vault_tls_generate_certs` | `false` | `true` for dev/test self-signed cert |
-| `vault_seal_type` | `shamir` | Change to `transit`/`awskms`/`azurekeyvault`/`gcpckms` for auto-unseal |
+| `vault_version` | `"2.0.3"` | Pin your desired Vault version |
+| `vault_install_method` | `"package"` | `package` or `binary` |
+| `vault_tls_enabled` | `true` | **TLS on by default** — supply BYO certs or set `vault_tls_generate_certs: true` |
+| `vault_tls_generate_certs` | `false` | `true` = self-signed cert (dev/test only) |
+| `vault_tls_leader_servername` | `"vault.cluster.internal"` | Must be a DNS SAN on every node's cert |
+| `vault_seal_type` | `"shamir"` | Change to `transit`/`awskms`/`azurekeyvault`/`gcpckms` for auto-unseal |
 | `vault_raft_peers` | `groups['vault']` | All nodes in the `[vault]` inventory group |
-| `vault_init_bootstrap_node` | `vault_raft_peers[0]` | Where init is delegated |
-| `vault_config_only` | `false` | Set `true` for template-only dry-run |
+| `vault_init_bootstrap_node` | `vault_raft_peers[0]` | Node where `vault operator init` runs |
+| `vault_init_output_path` | `{{ playbook_dir }}/.vault_init_…json` | Mode `0600`; optionally encrypted |
+| `vault_init_encrypt_output` | `true` | Encrypt init JSON with `ansible-vault` |
+| `vault_disable_mlock` | `true` | Required for Raft/BoltDB mmap |
+| `vault_manage_swap` | `true` | `swapoff -a` + purge fstab |
+| `vault_config_only` | `false` | `true` = template-only dry-run (skip install/service/init) |
 
 ---
 
 ## Security notes
 
-- **TLS is on by default.** Supply BYO certificates (`vault_tls_generate_certs: false`,
-  the default) or enable role-generated self-signed certs for dev/test.
-- **Init output** (`vault_init_output_path`) is saved mode `0600` on the controller
-  and optionally encrypted with `ansible-vault encrypt` (`vault_init_encrypt_output: true`,
-  the default). Never commit this file.
-- **Unseal keys vs recovery keys:** under auto-unseal, Vault returns *recovery keys*,
-  not unseal keys. Recovery keys only gate root-token generation and rekey — they cannot
-  unseal a cluster if the KMS is unavailable. KMS key deletion = permanent cluster loss.
-- **Transit unsealer token:** use an orphan periodic token with no max TTL to prevent
-  expiry-induced cluster lock-out.
-- All tasks touching unseal/recovery keys, root token, or seal secrets run with
-  `no_log: true`.
+### TLS
+
+TLS is **on by default**. Supply BYO certificates (`vault_tls_generate_certs: false`,
+the default) or enable role-generated self-signed certs for dev/test only. The
+`vault_tls_leader_servername` value **must be a DNS SAN** on every node's certificate
+(CN matching was removed in Go 1.17); a mismatch causes an explicit x509 handshake
+error during `retry_join`.
+
+### Init output
+
+The init file (`vault_init_output_path`) is saved mode `0600` on the Ansible
+controller and optionally encrypted with `ansible-vault encrypt`
+(`vault_init_encrypt_output: true`, the default). **Never commit this file.**
+The filename includes `vault_cluster_id` to prevent multi-cluster overwrites.
+
+### Unseal keys vs recovery keys
+
+Under auto-unseal (`vault_seal_type != shamir`), Vault returns **recovery keys**,
+not unseal keys. Recovery keys only gate root-token generation and rekey — they
+**cannot unseal** a cluster if the KMS is unavailable. **KMS key deletion =
+permanent, unrecoverable cluster loss.** Enable deletion protection on your KMS key.
+
+### Transit unsealer token
+
+Use an **orphan periodic token with no max TTL** for the transit unsealer. A
+non-periodic token expiring while all Vault nodes are down causes permanent lock-out.
+See `examples/autounseal_transit.yml` for the recommended creation command.
+
+### Certificate validity (825 days)
+
+The default `vault_tls_cert_validity: "+825d"` is a hard limit on **Apple platforms
+only**. Linux systems and Vault itself accept longer periods. Adjust as required by
+your PKI policy.
+
+### Sensitive tasks
+
+All tasks touching unseal/recovery keys, the root token, or seal credentials run
+with `no_log: true`. A `-vvv` run will **not** expose these values.
+
+### mlock and swap
+
+`vault_disable_mlock: true` is required for Raft integrated storage (BoltDB uses
+mmap). With mlock disabled, key material may be written to swap. The role runs
+`swapoff -a` and purges fstab entries when `vault_manage_swap: true` (default).
+
+### Handler note
+
+The daemon-reload, restart, and reload handlers call `ansible.builtin.systemd`
+which requires root. They rely on the consuming play declaring `become: true` at
+the play level.
+
+---
+
+## Tests (Molecule)
+
+```bash
+# Install test dependencies
+pip install -r requirements.txt
+
+# Offline template validation (fast, no Vault install)
+molecule test -s render
+
+# Full single-node install + init + unseal + audit
+molecule test -s default
+
+# Three-node Raft HA cluster (heavy — run manually)
+molecule test -s raft-ha
+```
+
+The CI pipeline (`ci.yml`) runs `render` and `default` on `debian12`, `ubuntu2404`,
+and `rockylinux9` on every push/PR. The `raft-ha` scenario is manual
+(workflow_dispatch) due to resource requirements.
+
+---
+
+## File layout
+
+```
+ansible-role-hashicorp-vault/
+├── defaults/main.yml              # 107 public variables
+├── vars/main.yml                  # OS-family maps (internal)
+├── meta/main.yml                  # Galaxy metadata
+├── meta/argument_specs.yml        # 1:1 with defaults (107 entries)
+├── tasks/
+│   ├── main.yml                   # orchestrator
+│   ├── validate.yml               # cross-var assertions
+│   ├── install.yml                # dispatch package/binary
+│   ├── install_package.yml        # deb822_repository / yum_repository
+│   ├── install_binary.yml         # GPG-verified zip
+│   ├── config.yml                 # dirs, perms, vault.env, vault.hcl, vault.service
+│   ├── tls.yml                    # generate (community.crypto) or BYO + trust store
+│   ├── service.yml                # systemd start/enable
+│   ├── init_unseal.yml            # idempotent init + unseal + raft verify
+│   └── audit.yml                  # file audit device
+├── handlers/main.yml              # daemon-reload / restart / reload
+├── templates/
+│   ├── vault.hcl.j2
+│   ├── vault.env.j2
+│   └── vault.service.j2
+├── molecule/{default,render,raft-ha}/
+├── examples/{single_node.yml,raft_cluster.yml,autounseal_transit.yml}
+├── docs/{CONFIGURATION.md,INTEGRATION.md,TROUBLESHOOTING.md}
+└── .github/workflows/{ci.yml,galaxy.yml}
+```
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

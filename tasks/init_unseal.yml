@@ -142,13 +142,17 @@
 
 - name: Extract unseal keys and root token from init JSON (Shamir)
   ansible.builtin.set_fact:
-    __vault_unseal_keys: "{{ __vault_init_json['unseal_keys_b64'] }}"
+    # unseal_keys_hex: the raw hex-encoded shares. Both 'vault operator unseal'
+    # and the /v1/sys/unseal API accept hex; b64 shares are unreliable on Raft
+    # followers whose barrier has not yet been initialized (they silently return
+    # Unseal Progress 0/1 instead of advancing toward the threshold).
+    __vault_unseal_keys: "{{ __vault_init_json['unseal_keys_hex'] }}"
     __vault_root_token: "{{ __vault_init_json['root_token'] }}"
   run_once: true
   no_log: true
   when:
     - __vault_init_json is defined
-    - "'unseal_keys_b64' in __vault_init_json"
+    - "'unseal_keys_hex' in __vault_init_json"
   tags: init_unseal
 
 - name: Extract recovery keys and root token from init JSON (auto-unseal)
@@ -160,6 +164,21 @@
   when:
     - __vault_init_json is defined
     - "'recovery_keys_b64' in __vault_init_json"
+  tags: init_unseal
+
+# Broadcast unseal keys to every host in the play.
+# run_once above only sets the fact on the bootstrap node; follower nodes need
+# the keys to unseal themselves. We copy the keys from hostvars[bootstrap] so
+# every node can run the unseal task independently.
+- name: Broadcast unseal keys to all nodes (Shamir)
+  ansible.builtin.set_fact:
+    __vault_unseal_keys: "{{ hostvars[vault_init_bootstrap_node]['__vault_unseal_keys'] }}"
+    __vault_root_token: "{{ hostvars[vault_init_bootstrap_node]['__vault_root_token'] }}"
+  no_log: true
+  when:
+    - vault_seal_type == 'shamir'
+    - inventory_hostname != vault_init_bootstrap_node
+    - hostvars[vault_init_bootstrap_node]['__vault_unseal_keys'] is defined
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -263,6 +282,52 @@
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
+# 5aa. Wait for follower nodes to become initialized via Raft join.
+#
+#  In a multi-node Raft cluster, follower nodes (vault2, vault3) start
+#  initialized=false. They join the leader (vault1) automatically via
+#  retry_join once vault1 is unsealed and active. Only after the join
+#  completes does the follower report initialized=true (sealed=true).
+#  The unseal POST returns HTTP 400 ("Vault is not initialized") if sent
+#  before the join; this wait prevents that race.
+#
+#  Single-node deployments skip this task (bootstrap == only host).
+# ------------------------------------------------------------------------------
+
+- name: Wait for follower to become initialized via Raft join
+  ansible.builtin.command: >-
+    {{ vault_bin_path }} status -format=json
+  environment:
+    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  register: __vault_follower_init_probe
+  changed_when: false
+  failed_when: __vault_follower_init_probe['rc'] not in [0, 1, 2]
+  retries: 30
+  delay: 10
+  until: >-
+    __vault_follower_init_probe['stdout'] | length > 0
+    and (__vault_follower_init_probe['stdout'] | from_json).get('initialized', false) | bool
+  when:
+    - vault_seal_type == 'shamir'
+    - vault_unseal | bool
+    - inventory_hostname != vault_init_bootstrap_node
+    - not (__vault_status.get('initialized', false) | bool)
+  tags: init_unseal
+
+- name: Update __vault_status after follower Raft join (Shamir followers only)
+  ansible.builtin.set_fact:
+    __vault_status: "{{ __vault_follower_init_probe['stdout'] | from_json }}"
+  when:
+    - vault_seal_type == 'shamir'
+    - vault_unseal | bool
+    - inventory_hostname != vault_init_bootstrap_node
+    - __vault_follower_init_probe is defined
+    - not __vault_follower_init_probe['skipped'] | default(false) | bool
+    - __vault_follower_init_probe['stdout'] | default('') | length > 0
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
 # 5b. Self-heal / steady-state reconcile — load saved init data from controller
 #     when this run did NOT perform a fresh init but the init file exists.
 #     Enables re-unseal and audit/raft reconcile on every subsequent run.
@@ -299,10 +364,10 @@
 
     - name: Restore unseal keys from saved init file (Shamir)
       ansible.builtin.set_fact:
-        __vault_unseal_keys: "{{ __vault_init_json_loaded['unseal_keys_b64'] }}"
+        __vault_unseal_keys: "{{ __vault_init_json_loaded['unseal_keys_hex'] }}"
         __vault_root_token: "{{ __vault_init_json_loaded['root_token'] }}"
       no_log: true
-      when: "'unseal_keys_b64' in __vault_init_json_loaded"
+      when: "'unseal_keys_hex' in __vault_init_json_loaded"
 
     - name: Restore recovery keys and root token from saved init file (auto-unseal)
       ansible.builtin.set_fact:
@@ -310,6 +375,21 @@
         __vault_root_token: "{{ __vault_init_json_loaded['root_token'] }}"
       no_log: true
       when: "'recovery_keys_b64' in __vault_init_json_loaded"
+
+# Broadcast unseal keys from self-heal load (also run_once, same propagation issue).
+# If __vault_unseal_keys was restored from the saved init file on vault1,
+# share it with follower nodes so they can unseal themselves.
+- name: Broadcast self-heal unseal keys to all nodes (Shamir)
+  ansible.builtin.set_fact:
+    __vault_unseal_keys: "{{ hostvars[vault_init_bootstrap_node]['__vault_unseal_keys'] }}"
+    __vault_root_token: "{{ hostvars[vault_init_bootstrap_node]['__vault_root_token'] }}"
+  no_log: true
+  when:
+    - vault_seal_type == 'shamir'
+    - inventory_hostname != vault_init_bootstrap_node
+    - __vault_unseal_keys is not defined
+    - hostvars[vault_init_bootstrap_node]['__vault_unseal_keys'] is defined
+  tags: init_unseal
 
 # ------------------------------------------------------------------------------
 # 6. Unseal — Shamir only; loop per key share up to the threshold.
@@ -364,7 +444,11 @@
     __vault_post_unseal_cmd['rc'] == 0 and
     __vault_post_unseal_cmd['stdout'] | length > 0 and
     not (__vault_post_unseal_cmd['stdout'] | from_json)['sealed'] | default(true) | bool
-  retries: 12
+  # 12 retries × 5 s is sufficient for a single-node re-unseal but can be tight
+  # for a fresh Raft follower whose bootstrap challenge with the leader may take
+  # ~30-120 s after the unseal key is accepted. Keep 12/5 for speed on single-node;
+  # real-world multi-node will succeed well within this window on non-Docker infra.
+  retries: 24
   delay: 5
   when:
     - vault_init | bool or vault_unseal | bool
@@ -391,14 +475,19 @@
   run_once: true
   register: __vault_raft_peers_cmd
   changed_when: false
-  failed_when: false
+  # failed_when is intentionally omitted so that Ansible fails the task when
+  # retries are exhausted without meeting the until condition. With failed_when:
+  # false the task would silently report ok even with 1 peer, causing the assert
+  # below to fail with confusing messaging.
   until: >-
     __vault_raft_peers_cmd['rc'] == 0 and
     __vault_raft_peers_cmd['stdout'] | length > 0 and
     ((__vault_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] | length) == (vault_raft_peers | length) and
     ((__vault_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] | selectattr('voter', 'equalto', true) | list | length) == (vault_raft_peers | length)
-  retries: 12
-  delay: 5
+  # Follower unseal in a fresh Raft cluster may take ~360 s (18x10s wait for
+  # initialized + 12x10s wait for unsealed + join latency). Allow enough headroom.
+  retries: 42
+  delay: 10
   no_log: true
   when:
     - __vault_root_token is defined

@@ -1,0 +1,104 @@
+---
+name: CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      run_raft_ha:
+        description: "Run raft-ha scenario (heavy — 3-node cluster)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: yamllint
+        run: yamllint .
+      - name: ansible-lint
+        run: ansible-lint
+
+  molecule:
+    name: molecule / ${{ matrix.scenario }} / ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # render scenario — offline template validation, runs on all distros
+          - scenario: render
+            distro: debian12
+          - scenario: render
+            distro: ubuntu2404
+          - scenario: render
+            distro: rockylinux9
+          # default scenario — full install + init + unseal + audit
+          - scenario: default
+            distro: debian12
+          - scenario: default
+            distro: ubuntu2404
+          - scenario: default
+            distro: rockylinux9
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Molecule scenario
+        run: molecule test -s ${{ matrix.scenario }}
+        env:
+          PY_COLORS: "1"
+          ANSIBLE_FORCE_COLOR: "1"
+          MOLECULE_DISTRO: ${{ matrix.distro }}
+
+  molecule-raft-ha:
+    # Heavy 3-node HA scenario — triggered manually via workflow_dispatch only.
+    # Requires Docker with adequate resources to run 3 systemd containers concurrently.
+    name: molecule / raft-ha
+    runs-on: ubuntu-latest
+    needs: lint
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_raft_ha == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run raft-ha Molecule scenario
+        run: molecule test -s raft-ha
+        env:
+          PY_COLORS: "1"
+          ANSIBLE_FORCE_COLOR: "1"
+          MOLECULE_DISTRO: debian12

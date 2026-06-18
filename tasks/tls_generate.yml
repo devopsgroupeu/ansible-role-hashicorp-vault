@@ -2,6 +2,13 @@
 # ==============================================================================
 # Generate a self-signed CA + node certificate via community.crypto (ownca).
 # For dev/test use. In production supply BYO certs (vault_tls_generate_certs=false).
+#
+# Multi-node (Raft) note:
+#   All nodes MUST share the same CA so that retry_join TLS handshakes succeed.
+#   Strategy:
+#     1. The bootstrap node (vault_init_bootstrap_node) generates the CA.
+#     2. All other nodes fetch the CA cert + key from the bootstrap node via slurp
+#        and write them locally before signing their own node certificate.
 # ==============================================================================
 
 # Build the full SAN list once so it is available to both the CSR and the
@@ -34,9 +41,11 @@
       {{ sans }}
   tags: tls
 
-# --- CA private key -----------------------------------------------------------
+# ==============================================================================
+# Step 1: Generate CA on the bootstrap node only.
+# ==============================================================================
 
-- name: Generate CA private key (ECC)
+- name: Generate CA private key (ECC) on bootstrap node
   community.crypto.openssl_privatekey:
     path: "{{ vault_tls_dir }}/vault-ca-key.pem"
     type: ECC
@@ -44,10 +53,12 @@
     owner: root
     group: root
     mode: "0600"
-  when: vault_tls_cert_key_type == 'ECC'
+  when:
+    - vault_tls_cert_key_type == 'ECC'
+    - inventory_hostname == vault_init_bootstrap_node
   tags: tls
 
-- name: Generate CA private key (RSA)
+- name: Generate CA private key (RSA) on bootstrap node
   community.crypto.openssl_privatekey:
     path: "{{ vault_tls_dir }}/vault-ca-key.pem"
     type: RSA
@@ -55,12 +66,12 @@
     owner: root
     group: root
     mode: "0600"
-  when: vault_tls_cert_key_type == 'RSA'
+  when:
+    - vault_tls_cert_key_type == 'RSA'
+    - inventory_hostname == vault_init_bootstrap_node
   tags: tls
 
-# --- Self-signed CA certificate -----------------------------------------------
-
-- name: Generate CA CSR (in memory)
+- name: Generate CA CSR (in memory) on bootstrap node
   community.crypto.openssl_csr_pipe:
     privatekey_path: "{{ vault_tls_dir }}/vault-ca-key.pem"
     common_name: "Vault Role CA"
@@ -75,9 +86,10 @@
     key_usage_critical: true
   register: __vault_ca_csr
   changed_when: false
+  when: inventory_hostname == vault_init_bootstrap_node
   tags: tls
 
-- name: Generate CA certificate (self-signed)
+- name: Generate CA certificate (self-signed) on bootstrap node
   community.crypto.x509_certificate:
     path: "{{ vault_tls_ca_file }}"
     csr_content: "{{ __vault_ca_csr['csr'] }}"
@@ -88,9 +100,57 @@
     owner: root
     group: root
     mode: "{{ vault_tls_cert_mode }}"
+  when: inventory_hostname == vault_init_bootstrap_node
   tags: tls
 
-# --- Node private key ---------------------------------------------------------
+# ==============================================================================
+# Step 2: Distribute the shared CA cert + key from bootstrap to all other nodes.
+# This ensures every node signs its cert with the same CA.
+# ==============================================================================
+
+- name: Fetch CA cert from bootstrap node
+  ansible.builtin.slurp:
+    src: "{{ vault_tls_ca_file }}"
+  register: __vault_ca_cert_b64
+  delegate_to: "{{ vault_init_bootstrap_node }}"
+  run_once: false
+  when: inventory_hostname != vault_init_bootstrap_node
+  tags: tls
+
+- name: Fetch CA private key from bootstrap node
+  ansible.builtin.slurp:
+    src: "{{ vault_tls_dir }}/vault-ca-key.pem"
+  register: __vault_ca_key_b64
+  delegate_to: "{{ vault_init_bootstrap_node }}"
+  run_once: false
+  when: inventory_hostname != vault_init_bootstrap_node
+  no_log: true
+  tags: tls
+
+- name: Write shared CA cert to non-bootstrap nodes
+  ansible.builtin.copy:
+    content: "{{ __vault_ca_cert_b64['content'] | b64decode }}"
+    dest: "{{ vault_tls_ca_file }}"
+    owner: root
+    group: root
+    mode: "{{ vault_tls_cert_mode }}"
+  when: inventory_hostname != vault_init_bootstrap_node
+  tags: tls
+
+- name: Write shared CA private key to non-bootstrap nodes
+  ansible.builtin.copy:
+    content: "{{ __vault_ca_key_b64['content'] | b64decode }}"
+    dest: "{{ vault_tls_dir }}/vault-ca-key.pem"
+    owner: root
+    group: root
+    mode: "0600"
+  when: inventory_hostname != vault_init_bootstrap_node
+  no_log: true
+  tags: tls
+
+# ==============================================================================
+# Step 3: Every node generates its own private key and cert signed by the shared CA.
+# ==============================================================================
 
 - name: Generate node private key (ECC)
   community.crypto.openssl_privatekey:
@@ -164,7 +224,7 @@
 
 # --- Node certificate (ownca signed) -----------------------------------------
 
-- name: Sign node certificate with role CA
+- name: Sign node certificate with shared CA
   community.crypto.x509_certificate:
     path: "{{ vault_tls_cert_file }}"
     csr_content: "{{ __vault_node_csr['csr'] }}"

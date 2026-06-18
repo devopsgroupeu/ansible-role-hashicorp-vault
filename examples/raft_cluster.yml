@@ -1,0 +1,70 @@
+---
+# Three-node Raft cluster deployment — production with BYO TLS certificates.
+#
+# Inventory:
+#   [vault]
+#   vault1 ansible_host=192.0.2.11
+#   vault2 ansible_host=192.0.2.12
+#   vault3 ansible_host=192.0.2.13
+#
+# Pre-requisites:
+#   - Place TLS material at vault_tls_{cert,key,ca}_file paths on all nodes
+#     (or use a separate play to distribute them from a secrets manager).
+#   - The cert must carry SANs for:
+#       vault.cluster.internal (== vault_tls_leader_servername)
+#       each node FQDN / hostname
+#       each node IP
+#       IP:127.0.0.1
+#     and extended_key_usage must include both serverAuth and clientAuth
+#     (Raft mTLS requires clientAuth on the API cert).
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts examples/raft_cluster.yml \
+#     --vault-password-file ~/.vault-pass
+#
+# After the run:
+#   - Init file: {{ playbook_dir }}/.vault_init_vault1.json (encrypted)
+#   - Unseal: the role unseals all nodes automatically using the generated shares
+#   - Rotate secrets at your earliest opportunity; store unseal keys in a
+#     hardened secrets manager.
+
+- name: Deploy three-node Vault Raft cluster
+  hosts: vault
+  become: true
+  gather_facts: true
+  roles:
+    - role: devopsgroupeu.hashicorp_vault
+      vars:
+        # ---- TLS (BYO — production default) ------------------------------------
+        vault_tls_generate_certs: false
+        vault_tls_cert_file: "/opt/vault/tls/vault-cert.pem"
+        vault_tls_key_file: "/opt/vault/tls/vault-key.pem"
+        vault_tls_ca_file: "/opt/vault/tls/vault-ca.pem"
+        vault_tls_leader_servername: "vault.cluster.internal"
+
+        # ---- Raft ---------------------------------------------------------------
+        # vault_raft_peers defaults to groups['vault'] — no override needed when
+        # the inventory group 'vault' contains exactly the 3 nodes above.
+
+        # ---- Init / unseal ------------------------------------------------------
+        vault_init_key_shares: 5
+        vault_init_key_threshold: 3
+        vault_init_encrypt_output: true
+        # Provide the ansible-vault password file on the controller:
+        vault_init_encrypt_password_file: "~/.vault-pass"
+
+        # ---- Addressing ---------------------------------------------------------
+        # api_addr and cluster_addr are templated from ansible_default_ipv4.address
+        # by default; override per-host in host_vars or group_vars if needed.
+
+        # ---- Hardening ----------------------------------------------------------
+        vault_disable_mlock: true
+        vault_manage_swap: true
+        vault_manage_selinux: true  # no-op on Debian/Ubuntu
+
+        # ---- Telemetry ----------------------------------------------------------
+        vault_telemetry_enabled: true
+        vault_telemetry_unauthenticated_metrics_access: false
+
+        # ---- Audit --------------------------------------------------------------
+        vault_audit_enabled: true

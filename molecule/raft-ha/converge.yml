@@ -1,0 +1,72 @@
+---
+# Converge for the raft-ha scenario.
+# Deploys a 3-node Raft cluster across vault1 / vault2 / vault3.
+#
+# Container networking notes:
+#   - All three containers share the 'vault-raft' Docker network (see molecule.yml).
+#   - Docker's embedded DNS resolves container hostnames, so retry_join uses the
+#     container name (vault1 / vault2 / vault3) as the peer address.
+#   - vault_api_addr and vault_cluster_addr are set per-host via host_vars so that
+#     each node advertises its own container hostname.
+#   - vault_tls_generate_certs: true with vault_tls_extra_sans covering all three
+#     hostnames + IPs ensures the shared CA cert can be used for retry_join mTLS.
+#
+# Init/unseal notes:
+#   - vault_init_bootstrap_node defaults to vault_raft_peers[0] = 'vault1'.
+#   - Init runs once on vault1 (run_once + delegate_to).
+#   - Shamir unseal runs on all nodes (each needs the key; init_unseal.yml handles
+#     distributing the unseal key from the controller to every sealed node).
+#   - vault_init_key_shares/threshold=1 for test simplicity.
+#   - vault_init_encrypt_output=false — no ansible-vault password available unattended.
+
+- name: Converge raft-ha
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    # Cluster peers — all three container hostnames (Docker DNS resolves these).
+    vault_raft_peers:
+      - vault1
+      - vault2
+      - vault3
+
+    # Per-node addressing: each node advertises its own container hostname.
+    # vault_api_addr and vault_cluster_addr are overridden per-host via host_vars
+    # (see molecule/raft-ha/host_vars/). The defaults here are fallbacks.
+    vault_api_addr: "https://{{ inventory_hostname }}:8200"
+    vault_cluster_addr: "https://{{ inventory_hostname }}:8201"
+
+    # TLS: role-generated certs with SANs covering all three node hostnames,
+    # IPs, and the shared leader_tls_servername.
+    vault_tls_generate_certs: true
+    vault_tls_leader_servername: "vault.cluster.internal"
+    vault_tls_extra_sans:
+      - "DNS:vault1"
+      - "DNS:vault2"
+      - "DNS:vault3"
+
+    # mlock cannot be used inside plain Docker containers.
+    vault_disable_mlock: true
+
+    # Swap is not configured in containers.
+    vault_manage_swap: false
+
+    # Do not install CA into trust store in ephemeral containers.
+    vault_tls_install_ca_to_trust_store: false
+
+    # Init settings: 1 share / threshold for test simplicity.
+    vault_init: true
+    vault_unseal: true
+    vault_init_key_shares: 1
+    vault_init_key_threshold: 1
+    vault_init_encrypt_output: false
+    vault_init_output_path: "/tmp/.vault_init_molecule_raft_ha.json"
+    vault_audit_enabled: true
+
+    # Telemetry on (default).
+    vault_telemetry_enabled: true
+
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault

@@ -1,0 +1,97 @@
+---
+# raft-ha scenario — 3-node Raft integrated-storage cluster.
+#
+# All three platforms share a named Docker network ('vault-raft') so that
+# container hostnames resolve via Docker's embedded DNS. The network is declared
+# under each platform so molecule-plugins creates it before the first container
+# starts. Using a shared network is the only reliable way to make retry_join
+# hostname resolution work between containers.
+#
+# Idempotence step is intentionally omitted from test_sequence: a live 3-node
+# Raft cluster that already exists cannot be cleanly re-converged in a single
+# Molecule run (Vault rejects a second init, and the unseal loop is guarded by
+# status probes, but the raft formation verify 'until' may time out on a
+# second pass when autopilot has already promoted peers). The scenario is
+# validated via syntax check + converge + verify. Run manually with:
+#   molecule test -s raft-ha
+# or via GitHub Actions workflow_dispatch (see .github/workflows/ci.yml).
+
+dependency:
+  name: galaxy
+
+driver:
+  name: docker
+
+platforms:
+  - name: vault1
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: ""
+    groups:
+      - vault
+    networks:
+      - name: vault-raft
+
+  - name: vault2
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: ""
+    groups:
+      - vault
+    networks:
+      - name: vault-raft
+
+  - name: vault3
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: ""
+    groups:
+      - vault
+    networks:
+      - name: vault-raft
+
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
+  config_options:
+    defaults:
+      interpreter_python: auto_silent
+      callbacks_enabled: profile_tasks, timer
+      stdout_callback: default
+    ssh_connection:
+      pipelining: false
+  inventory:
+    hosts:
+      all:
+        vars:
+          ansible_user: root
+
+verifier:
+  name: ansible
+
+scenario:
+  # Idempotence is omitted — see header comment above.
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - verify
+    - cleanup
+    - destroy

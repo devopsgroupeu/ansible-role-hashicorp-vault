@@ -1,0 +1,89 @@
+---
+# Three-node Vault cluster with Transit auto-unseal.
+#
+# Topology:
+#   Unsealer Vault (pre-existing, separate cluster):
+#     URL: https://unsealer.example.internal:8200
+#     Transit mount: transit/
+#     Encryption key: autounseal
+#     Token: orphan periodic token with no max TTL
+#
+#   This cluster (the "sealed" cluster):
+#     [vault]
+#     vault1 ansible_host=192.0.2.11
+#     vault2 ansible_host=192.0.2.12
+#     vault3 ansible_host=192.0.2.13
+#
+# Security notes:
+#   - The transit token MUST be an orphan periodic token with no max TTL.
+#     A non-periodic token expiring while all nodes are down = permanent lock-out.
+#     Create it on the unsealer cluster:
+#       vault token create \
+#         -orphan \
+#         -policy=autounseal \
+#         -period=24h \
+#         -display-name=vault-autounseal
+#   - Store the token in Ansible Vault and pass it via vault_transit_token below.
+#   - With auto-unseal, init returns RECOVERY KEYS (not unseal keys). Recovery
+#     keys cannot unseal the cluster if the KMS (unsealer) is unavailable; they
+#     only gate root-token generation and rekey. KMS key deletion = permanent loss.
+#   - All tasks touching the transit token run with no_log: true.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts examples/autounseal_transit.yml \
+#     --vault-password-file ~/.vault-pass
+#
+# group_vars/vault/vault.yml (ansible-vault encrypted):
+#   vault_transit_token: "s.ACTUAL_TOKEN_HERE"
+
+- name: Deploy Vault cluster with Transit auto-unseal
+  hosts: vault
+  become: true
+  gather_facts: true
+  vars:
+    # Load the transit token from Ansible Vault-encrypted group_vars.
+    # This variable must be defined externally; it is referenced below with no_log.
+    vault_transit_token: "{{ vault_transit_token | default('') }}"
+  roles:
+    - role: devopsgroupeu.hashicorp_vault
+      vars:
+        # ---- TLS (BYO — production default) ------------------------------------
+        vault_tls_generate_certs: false
+        vault_tls_cert_file: "/opt/vault/tls/vault-cert.pem"
+        vault_tls_key_file: "/opt/vault/tls/vault-key.pem"
+        vault_tls_ca_file: "/opt/vault/tls/vault-ca.pem"
+        vault_tls_leader_servername: "vault.cluster.internal"
+
+        # ---- Seal: Transit auto-unseal -----------------------------------------
+        vault_seal_type: "transit"
+        vault_seal_transit_address: "https://unsealer.example.internal:8200"
+        vault_seal_transit_key_name: "autounseal"
+        vault_seal_transit_mount_path: "transit/"
+        # Token delivered via vault.env (no_log); never written into vault.hcl.
+        # Use an orphan periodic token — see security notes above.
+        vault_seal_transit_token: "{{ vault_transit_token }}"
+        # Optional: CA for verifying the unsealer Vault TLS cert.
+        # vault_seal_transit_tls_ca_cert: "/etc/ssl/certs/unsealer-ca.pem"
+
+        # ---- Init / unseal ------------------------------------------------------
+        # With transit auto-unseal, Vault returns recovery keys (not unseal keys).
+        vault_init_recovery_shares: 5
+        vault_init_recovery_threshold: 3
+        vault_init_encrypt_output: true
+        vault_init_encrypt_password_file: "~/.vault-pass"
+        # vault_unseal is a no-op under auto-unseal (KMS unseals on startup).
+        vault_unseal: true
+
+        # ---- Raft ---------------------------------------------------------------
+        vault_raft_performance_multiplier: 1
+
+        # ---- Hardening ----------------------------------------------------------
+        vault_disable_mlock: true
+        vault_manage_swap: true
+
+        # ---- Telemetry ----------------------------------------------------------
+        vault_telemetry_enabled: true
+        vault_telemetry_unauthenticated_metrics_access: false
+
+        # ---- Audit --------------------------------------------------------------
+        vault_audit_enabled: true
