@@ -71,6 +71,7 @@
     group: "{{ vault_group }}"
     mode: "{{ vault_config_file_mode }}"
     backup: true
+  no_log: true
   notify:
     - reload systemd daemon
     - restart vault
@@ -111,28 +112,36 @@
 
 # ==============================================================================
 # Swap management (compensate for disable_mlock=true)
+# Not run in render-only mode (vault_config_only=true).
 # ==============================================================================
 
 - name: Disable swap immediately
   ansible.builtin.command: swapoff -a
-  when: vault_manage_swap | bool
-  changed_when: false
-  # rc 32 = no swap configured (common in containers); rc 0 = success
-  failed_when: __vault_swapoff.rc not in [0, 32]
   register: __vault_swapoff
+  # rc 32 = no swap configured (common in containers); rc 0 = success
+  failed_when: __vault_swapoff['rc'] not in [0, 32]
+  changed_when: __vault_swapoff['rc'] == 0
+  when:
+    - vault_manage_swap | bool
+    - not vault_config_only | bool
   tags: config
 
 - name: Comment out swap entries from /etc/fstab
   ansible.builtin.replace:
     path: /etc/fstab
-    regexp: '^([^#\n].*?\sswap\s+sw\s.*)$'
+    # Match any uncommented line whose third whitespace-delimited field is 'swap'.
+    # Covers both Debian (sw options) and RHEL (defaults options) fstab swap entries.
+    regexp: '^([^#\S]*\S+\s+\S+\s+swap\s+\S+\s+.*)$'
     replace: '# \1'
     backup: true
-  when: vault_manage_swap | bool
+  when:
+    - vault_manage_swap | bool
+    - not vault_config_only | bool
   tags: config
 
 # ==============================================================================
 # SELinux context restore (RHEL-family only)
+# Not run in render-only mode (vault_config_only=true).
 # ==============================================================================
 
 - name: Restore SELinux context on Vault directories
@@ -147,5 +156,6 @@
   when:
     - vault_manage_selinux | bool
     - ansible_facts['os_family'] == 'RedHat'
+    - not vault_config_only | bool
   changed_when: false
   tags: config

@@ -81,6 +81,15 @@
         that: "'prometheus_retention_time' in vault_hcl"
         fail_msg: "vault.hcl missing top-level telemetry stanza (prometheus_retention_time absent)"
 
+    # --- Seal block must be absent for Shamir (default converge) ---
+
+    - name: Assert no seal stanza present for Shamir (default)
+      ansible.builtin.assert:
+        that: "'seal \"' not in vault_hcl"
+        fail_msg: >-
+          vault.hcl contains a 'seal "' stanza under default Shamir configuration.
+          No seal block should appear when vault_seal_type=shamir.
+
     # --- Verify vault.env exists and is non-empty ---
 
     - name: Slurp vault.env
@@ -167,3 +176,120 @@
         fail_msg: >-
           vault.hcl is missing tls_cipher_suites even though
           tls_min_version==tls_max_version==tls12.
+
+# ---------------------------------------------------------------------------
+# Variant: verify transit auto-unseal seal stanza renders correctly.
+# Re-run config tasks with vault_seal_type=transit and required transit fields.
+# ---------------------------------------------------------------------------
+
+- name: Converge transit-seal variant
+  hosts: all
+  gather_facts: true
+  vars:
+    vault_config_only: true
+    vault_raft_peers:
+      - vault-render
+      - vault-node-2
+      - vault-node-3
+    vault_tls_enabled: true
+    vault_tls_generate_certs: false
+    vault_tls_cert_file: /opt/vault/tls/vault-cert.pem
+    vault_tls_key_file: /opt/vault/tls/vault-key.pem
+    vault_tls_ca_file: /opt/vault/tls/vault-ca.pem
+    vault_tls_min_version: "tls12"
+    vault_tls_max_version: "tls13"
+    vault_api_addr: "https://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+    # Transit auto-unseal fields
+    vault_seal_type: "transit"
+    vault_seal_transit_address: "https://vault-unsealer.internal:8200"
+    vault_seal_transit_key_name: "autounseal-key"
+    vault_seal_transit_mount_path: "transit/"
+    vault_seal_transit_token: "s.placeholder-render-only"
+  tasks:
+    - name: Include role for transit-seal variant
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+- name: Verify transit seal stanza renders correctly
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Slurp vault.hcl after transit-seal render
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.hcl
+      register: vault_hcl_transit_raw
+
+    - name: Decode transit vault.hcl
+      ansible.builtin.set_fact:
+        vault_hcl_transit: "{{ vault_hcl_transit_raw['content'] | b64decode }}"
+
+    - name: Assert seal transit stanza is present
+      ansible.builtin.assert:
+        that: "'seal \"transit\"' in vault_hcl_transit"
+        fail_msg: "vault.hcl missing 'seal \"transit\"' stanza when vault_seal_type=transit"
+
+    - name: Assert transit key_name is rendered
+      ansible.builtin.assert:
+        that: "'autounseal-key' in vault_hcl_transit"
+        fail_msg: "vault.hcl missing transit key_name 'autounseal-key'"
+
+    - name: Assert transit mount_path is rendered
+      ansible.builtin.assert:
+        that: "'transit/' in vault_hcl_transit"
+        fail_msg: "vault.hcl missing transit mount_path 'transit/'"
+
+    - name: Slurp vault.env after transit-seal render
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.env
+      register: vault_env_transit_raw
+
+    - name: Assert VAULT_TOKEN appears in vault.env for transit seal
+      ansible.builtin.assert:
+        that: "'VAULT_TOKEN' in (vault_env_transit_raw['content'] | b64decode)"
+        fail_msg: "vault.env missing VAULT_TOKEN for transit seal type"
+
+# ---------------------------------------------------------------------------
+# Variant: verify NO seal block appears under default shamir configuration.
+# Re-run config tasks with default vault_seal_type (shamir).
+# ---------------------------------------------------------------------------
+
+- name: Converge shamir-default variant (reset from transit)
+  hosts: all
+  gather_facts: true
+  vars:
+    vault_config_only: true
+    vault_raft_peers:
+      - vault-render
+      - vault-node-2
+      - vault-node-3
+    vault_tls_enabled: true
+    vault_tls_generate_certs: false
+    vault_tls_cert_file: /opt/vault/tls/vault-cert.pem
+    vault_tls_key_file: /opt/vault/tls/vault-key.pem
+    vault_tls_ca_file: /opt/vault/tls/vault-ca.pem
+    vault_tls_min_version: "tls12"
+    vault_tls_max_version: "tls13"
+    vault_api_addr: "https://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+    vault_seal_type: "shamir"
+  tasks:
+    - name: Include role for shamir-default variant
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+- name: Verify no seal stanza present under shamir (default)
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Slurp vault.hcl after shamir render
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.hcl
+      register: vault_hcl_shamir_raw
+
+    - name: Assert no seal block in shamir vault.hcl
+      ansible.builtin.assert:
+        that: "'seal \"' not in (vault_hcl_shamir_raw['content'] | b64decode)"
+        fail_msg: >-
+          vault.hcl contains a 'seal "' stanza even though vault_seal_type=shamir.
+          No seal block should appear for Shamir (default) configuration.
