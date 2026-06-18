@@ -293,3 +293,62 @@
         fail_msg: >-
           vault.hcl contains a 'seal "' stanza even though vault_seal_type=shamir.
           No seal block should appear for Shamir (default) configuration.
+
+# ---------------------------------------------------------------------------
+# Variant: verify vault_extra_config (top-level) and vault_raft_extra_parameters
+# (inside storage "raft") are rendered into vault.hcl.
+# ---------------------------------------------------------------------------
+
+- name: Converge extra-config variant
+  hosts: all
+  gather_facts: true
+  vars:
+    vault_config_only: true
+    vault_raft_peers:
+      - vault-render
+      - vault-node-2
+      - vault-node-3
+    vault_tls_enabled: true
+    vault_tls_generate_certs: false
+    vault_tls_cert_file: /opt/vault/tls/vault-cert.pem
+    vault_tls_key_file: /opt/vault/tls/vault-key.pem
+    vault_tls_ca_file: /opt/vault/tls/vault-ca.pem
+    vault_tls_min_version: "tls12"
+    vault_tls_max_version: "tls13"
+    vault_api_addr: "https://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+    vault_seal_type: "shamir"
+    vault_raft_extra_parameters:
+      autopilot_reconcile_interval: "10s"
+    vault_extra_config:
+      pid_file: "/opt/vault/vault.pid"
+  tasks:
+    - name: Include role for extra-config variant
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+- name: Verify extra-config keys render correctly
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Slurp vault.hcl after extra-config render
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.hcl
+      register: vault_hcl_extra_raw
+
+    - name: Decode extra-config vault.hcl
+      ansible.builtin.set_fact:
+        vault_hcl_extra: "{{ vault_hcl_extra_raw['content'] | b64decode }}"
+
+    - name: Assert vault_raft_extra_parameters key is rendered in storage stanza
+      ansible.builtin.assert:
+        that: "'autopilot_reconcile_interval = \"10s\"' in vault_hcl_extra"
+        fail_msg: >-
+          vault.hcl missing vault_raft_extra_parameters key
+          'autopilot_reconcile_interval' in the storage "raft" stanza.
+
+    - name: Assert vault_extra_config key is rendered at top level
+      ansible.builtin.assert:
+        that: "'pid_file = \"/opt/vault/vault.pid\"' in vault_hcl_extra"
+        fail_msg: >-
+          vault.hcl missing top-level vault_extra_config key 'pid_file'.

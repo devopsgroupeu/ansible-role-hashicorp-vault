@@ -72,18 +72,29 @@
   tags: install
 
 # Verify the zip checksum against the signed SHA256SUMS file.
-# We extract only the line for this architecture's zip.
-- name: Read expected checksum for this zip from SHA256SUMS
-  ansible.builtin.command: >-
-    grep -E "^[0-9a-f]+\s+{{ __vault_zip_name }}$"
-    {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
-  register: __vault_expected_checksum_line
-  changed_when: false
+# SHA256SUMS lists every platform's zip, but only this architecture's zip was
+# downloaded. We therefore (a) assert the downloaded zip is present so a missing
+# zip fails closed, then (b) run sha256sum with --ignore-missing so the verify
+# checks our present file while skipping the absent other-platform entries.
+- name: Stat downloaded Vault zip before checksum verification
+  ansible.builtin.stat:
+    path: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
+  register: __vault_zip_stat
+  tags: install
+
+- name: Assert downloaded Vault zip exists
+  ansible.builtin.assert:
+    that:
+      - __vault_zip_stat['stat']['exists'] | bool
+    fail_msg: >-
+      Downloaded Vault zip {{ __vault_zip_name }} is missing from
+      {{ __vault_tmpdir }}; cannot verify checksum.
+    quiet: true
   tags: install
 
 - name: Verify zip checksum matches SHA256SUMS
   ansible.builtin.command: >-
-    sha256sum -c
+    sha256sum --ignore-missing -c
     {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
   args:
     chdir: "{{ __vault_tmpdir }}"

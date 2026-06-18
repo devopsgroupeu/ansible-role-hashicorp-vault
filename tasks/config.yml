@@ -117,13 +117,14 @@
 
 - name: Disable swap immediately
   ansible.builtin.command: swapoff -a
-  register: __vault_swapoff
-  # rc 32 = no swap configured (common in containers); rc 0 = success
-  failed_when: __vault_swapoff['rc'] not in [0, 32]
-  changed_when: __vault_swapoff['rc'] == 0
+  # Only run when swap is actually active. swapoff -a returns rc 0 even when no
+  # swap is on, so an unconditional run would report changed every time and
+  # break idempotence on VMs with swap.
+  changed_when: true
   when:
     - vault_manage_swap | bool
     - not vault_config_only | bool
+    - ansible_facts['swaptotal_mb'] | default(0) | int > 0
   tags: config
 
 - name: Comment out swap entries from /etc/fstab

@@ -254,10 +254,11 @@
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
-# 5a. Re-probe per-node Vault status after init so the unseal gate below sees
-#     the current sealed/initialized state (post-init, nodes are initialized+sealed).
-#     This also refreshes __vault_status on idempotent re-runs so the gate
-#     correctly skips unseal when Vault is already unsealed (rc=0, sealed=false).
+# 5a. Re-probe per-node Vault status after init so the unseal gates below see
+#     the current sealed/initialized state (post-init, the leader is
+#     initialized+sealed; followers are still uninitialized until they join).
+#     This also refreshes __vault_status on idempotent re-runs so the gates
+#     correctly skip unseal when Vault is already unsealed (rc=0, sealed=false).
 # ------------------------------------------------------------------------------
 
 - name: Re-probe Vault status on every node after init
@@ -279,52 +280,6 @@
       {%- else -%}
         {{ __vault_status }}
       {%- endif -%}
-  tags: init_unseal
-
-# ------------------------------------------------------------------------------
-# 5aa. Wait for follower nodes to become initialized via Raft join.
-#
-#  In a multi-node Raft cluster, follower nodes (vault2, vault3) start
-#  initialized=false. They join the leader (vault1) automatically via
-#  retry_join once vault1 is unsealed and active. Only after the join
-#  completes does the follower report initialized=true (sealed=true).
-#  The unseal POST returns HTTP 400 ("Vault is not initialized") if sent
-#  before the join; this wait prevents that race.
-#
-#  Single-node deployments skip this task (bootstrap == only host).
-# ------------------------------------------------------------------------------
-
-- name: Wait for follower to become initialized via Raft join
-  ansible.builtin.command: >-
-    {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-  register: __vault_follower_init_probe
-  changed_when: false
-  failed_when: __vault_follower_init_probe['rc'] not in [0, 1, 2]
-  retries: 30
-  delay: 10
-  until: >-
-    __vault_follower_init_probe['stdout'] | length > 0
-    and (__vault_follower_init_probe['stdout'] | from_json).get('initialized', false) | bool
-  when:
-    - vault_seal_type == 'shamir'
-    - vault_unseal | bool
-    - inventory_hostname != vault_init_bootstrap_node
-    - not (__vault_status.get('initialized', false) | bool)
-  tags: init_unseal
-
-- name: Update __vault_status after follower Raft join (Shamir followers only)
-  ansible.builtin.set_fact:
-    __vault_status: "{{ __vault_follower_init_probe['stdout'] | from_json }}"
-  when:
-    - vault_seal_type == 'shamir'
-    - vault_unseal | bool
-    - inventory_hostname != vault_init_bootstrap_node
-    - __vault_follower_init_probe is defined
-    - not __vault_follower_init_probe['skipped'] | default(false) | bool
-    - __vault_follower_init_probe['stdout'] | default('') | length > 0
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -392,16 +347,25 @@
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
-# 6. Unseal — Shamir only; loop per key share up to the threshold.
-#    Gate: Vault is initialized and sealed (works on both fresh init and
-#    re-unseal of a previously sealed node). Keys resolved from whichever
-#    source applies (fresh init this run, or loaded from saved init file).
-#    Use ansible.builtin.uri POST /v1/sys/unseal with no_log; show only index.
-#    Auto-unseal: skip entirely (KMS unseals on startup).
-#    Re-probe status after unseal to confirm sealed=false before continuing.
+# 6. Unseal — Shamir only. ORDERED for Ansible's default linear strategy: every
+#    task completes across the whole batch before the next begins, so the LEADER
+#    MUST be unsealed and active before followers can join/initialize via Raft.
+#
+#    Sequence (linear-strategy order):
+#      (b) Unseal the LEADER (bootstrap, initialized+sealed right after init).
+#      (c) Wait for the LEADER to become active/unsealed.
+#      (d) Wait for FOLLOWERS to become initialized via Raft join (only possible
+#          once the leader is active) — then re-probe their status.
+#      (e) Unseal the FOLLOWERS (initialized+sealed after join).
+#
+#    Single-node deployments have no followers, so steps (d)/(e) skip and only
+#    the leader is unsealed. Auto-unseal skips all of section 6 (KMS unseals on
+#    startup). On idempotent re-runs every unseal/wait task skips (sealed=false).
 # ------------------------------------------------------------------------------
 
-- name: Unseal Vault nodes (Shamir, per-share loop)
+# (b) Unseal the leader first. Under linear strategy this task finishes for the
+#     whole batch (followers skip instantly) before the next task runs.
+- name: Unseal Vault leader (Shamir, per-share loop)
   ansible.builtin.uri:
     url: "{{ vault_api_addr }}/v1/sys/unseal"
     method: POST
@@ -420,15 +384,106 @@
   when:
     - vault_unseal | bool
     - vault_seal_type == 'shamir'
+    - inventory_hostname == vault_init_bootstrap_node
+    - __vault_status['initialized'] | default(false) | bool
+    - __vault_status['sealed'] | default(true) | bool
+    - __vault_unseal_keys is defined
+  tags: init_unseal
+
+# (c) Wait for the leader to report active/unsealed before followers attempt to
+#     join. retry_join only succeeds against an unsealed, active leader.
+- name: Wait for leader to report unsealed status (Shamir)
+  ansible.builtin.command: >-
+    {{ vault_bin_path }} status -format=json
+  environment:
+    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  register: __vault_leader_unseal_probe
+  changed_when: false
+  failed_when: __vault_leader_unseal_probe['rc'] not in [0, 1, 2]
+  until: >-
+    __vault_leader_unseal_probe['rc'] == 0 and
+    __vault_leader_unseal_probe['stdout'] | length > 0 and
+    not (__vault_leader_unseal_probe['stdout'] | from_json)['sealed'] | default(true) | bool
+  retries: 24
+  delay: 5
+  when:
+    - vault_seal_type == 'shamir'
+    - inventory_hostname == vault_init_bootstrap_node
+    - vault_init | bool or vault_unseal | bool
+    - __vault_unseal_keys is defined
+  tags: init_unseal
+
+# (d) Wait for follower nodes to become initialized via Raft join.
+#
+#  In a multi-node Raft cluster, follower nodes start initialized=false. They
+#  join the now-active leader automatically via retry_join, and only after the
+#  join completes do they report initialized=true (sealed=true). Sending the
+#  unseal POST before the join returns HTTP 400 ("Vault is not initialized");
+#  this wait prevents that race. Single-node deployments skip this task.
+- name: Wait for follower to become initialized via Raft join
+  ansible.builtin.command: >-
+    {{ vault_bin_path }} status -format=json
+  environment:
+    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  register: __vault_follower_init_probe
+  changed_when: false
+  failed_when: __vault_follower_init_probe['rc'] not in [0, 1, 2]
+  retries: 30
+  delay: 10
+  until: >-
+    __vault_follower_init_probe['stdout'] | length > 0
+    and (__vault_follower_init_probe['stdout'] | from_json).get('initialized', false) | bool
+  when:
+    - vault_seal_type == 'shamir'
+    - vault_unseal | bool
+    - inventory_hostname != vault_init_bootstrap_node
+    - not (__vault_status.get('initialized', false) | bool)
+  tags: init_unseal
+
+# (e) Re-probe follower status (now initialized+sealed) then unseal followers.
+- name: Update __vault_status after follower Raft join (Shamir followers only)
+  ansible.builtin.set_fact:
+    __vault_status: "{{ __vault_follower_init_probe['stdout'] | from_json }}"
+  when:
+    - vault_seal_type == 'shamir'
+    - vault_unseal | bool
+    - inventory_hostname != vault_init_bootstrap_node
+    - __vault_follower_init_probe is defined
+    - not __vault_follower_init_probe['skipped'] | default(false) | bool
+    - __vault_follower_init_probe['stdout'] | default('') | length > 0
+  tags: init_unseal
+
+- name: Unseal Vault followers (Shamir, per-share loop)
+  ansible.builtin.uri:
+    url: "{{ vault_api_addr }}/v1/sys/unseal"
+    method: POST
+    body_format: json
+    body:
+      key: "{{ item }}"
+    validate_certs: true
+    ca_path: "{{ vault_tls_ca_file }}"
+    status_code:
+      - 200
+  no_log: true
+  loop: "{{ __vault_unseal_keys[: (vault_init_key_threshold | int)] }}"
+  loop_control:
+    index_var: __unseal_key_idx
+    label: "unseal_key_index={{ __unseal_key_idx }}"
+  when:
+    - vault_unseal | bool
+    - vault_seal_type == 'shamir'
+    - inventory_hostname != vault_init_bootstrap_node
     - __vault_status['initialized'] | default(false) | bool
     - __vault_status['sealed'] | default(true) | bool
     - __vault_unseal_keys is defined
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
-# 7. Wait for Vault to become unsealed after init+unseal
+# 7. Wait for every node to become unsealed after init+unseal.
 #    Re-probe status so downstream tasks (raft verify, audit) can assume
-#    Vault is active.
+#    Vault is active on all nodes.
 # ------------------------------------------------------------------------------
 
 - name: Wait for Vault to report unsealed status
@@ -444,10 +499,9 @@
     __vault_post_unseal_cmd['rc'] == 0 and
     __vault_post_unseal_cmd['stdout'] | length > 0 and
     not (__vault_post_unseal_cmd['stdout'] | from_json)['sealed'] | default(true) | bool
-  # 12 retries × 5 s is sufficient for a single-node re-unseal but can be tight
-  # for a fresh Raft follower whose bootstrap challenge with the leader may take
-  # ~30-120 s after the unseal key is accepted. Keep 12/5 for speed on single-node;
-  # real-world multi-node will succeed well within this window on non-Docker infra.
+  # A fresh Raft follower's bootstrap challenge with the leader may take
+  # ~30-120 s after the unseal key is accepted. Single-node re-unseal completes
+  # almost immediately; real-world multi-node succeeds well within this window.
   retries: 24
   delay: 5
   when:

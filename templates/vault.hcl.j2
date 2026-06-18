@@ -17,6 +17,15 @@ storage "raft" {
   path                   = "{{ vault_data_dir }}"
   node_id                = "{{ vault_raft_node_id }}"
   performance_multiplier = {{ vault_raft_performance_multiplier }}
+{% for key, value in vault_raft_extra_parameters.items() %}
+{% if value is boolean %}
+  {{ key }} = {{ value | lower }}
+{% elif value is number %}
+  {{ key }} = {{ value }}
+{% else %}
+  {{ key }} = "{{ value }}"
+{% endif %}
+{% endfor %}
 {% for peer in __vault_retry_join_peers %}
 
   retry_join {
@@ -100,4 +109,16 @@ seal "gcpckms" {
   crypto_key  = "{{ vault_seal_gcpckms_crypto_key }}"
 }
 {% endif %}
+{% endif %}
+{% if vault_extra_config %}
+
+{% for key, value in vault_extra_config.items() %}
+{% if value is boolean %}
+{{ key }} = {{ value | lower }}
+{% elif value is number %}
+{{ key }} = {{ value }}
+{% else %}
+{{ key }} = "{{ value }}"
+{% endif %}
+{% endfor %}
 {% endif %}

@@ -12,6 +12,13 @@
         apt-get update -qq &&
         apt-get install -y -qq --no-install-recommends python3 python3-apt
       changed_when: true
+      when: ansible_os_family is not defined or ansible_os_family != 'RedHat'
+
+    - name: Bootstrap Python (RHEL/Rocky)
+      ansible.builtin.raw: >-
+        dnf install -y python3
+      changed_when: true
+      when: ansible_os_family is defined and ansible_os_family == 'RedHat'
 
     - name: Gather facts after bootstrap
       ansible.builtin.setup:
