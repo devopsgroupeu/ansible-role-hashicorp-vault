@@ -66,10 +66,8 @@
     {{ vault_bin_path }} audit enable
     -path={{ vault_audit_path }}
     file
-    file_path={{ vault_audit_file_path }}
-    {%- for key, value in (vault_audit_options | default({}) | dict2items) %}
-    {{ key }}={{ value }}
-    {%- endfor %}
+    file_path={{ vault_audit_file_path }}{%- for key, value in (vault_audit_options | default({}) | dict2items) %}
+    {{ key }}={{ value }}{%- endfor %}
   environment:
     VAULT_ADDR: "{{ vault_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"

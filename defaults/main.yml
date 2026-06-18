@@ -269,6 +269,12 @@ vault_init_output_path: "{{ playbook_dir }}/.vault_init_{{ vault_cluster_id }}.j
 # Strongly recommended when not using PGP keys.
 vault_init_encrypt_output: true
 
+# Path to a password file on the Ansible controller used with
+# 'ansible-vault encrypt --vault-password-file'. Required when
+# vault_init_encrypt_output=true; encryption is skipped (with a warning) when
+# this is empty, avoiding an interactive prompt that hangs unattended runs.
+vault_init_encrypt_password_file: ""
+
 # Stable identifier used in the init output filename. Defaults to the first
 # peer hostname; override to a human-readable cluster name if desired.
 vault_cluster_id: "{{ vault_raft_peers[0] }}"

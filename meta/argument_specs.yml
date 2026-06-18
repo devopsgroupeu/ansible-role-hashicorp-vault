@@ -503,6 +503,16 @@ argument_specs:
         default: true
         description: Encrypt the saved init JSON with ansible-vault after writing.
 
+      vault_init_encrypt_password_file:
+        type: str
+        required: false
+        default: ""
+        description: >
+          Path to a password file on the Ansible controller used with
+          'ansible-vault encrypt --vault-password-file'. Encryption is skipped
+          (with a warning) when this is empty, avoiding interactive prompts that
+          hang unattended runs. Required when vault_init_encrypt_output=true.
+
       vault_cluster_id:
         type: str
         required: false
