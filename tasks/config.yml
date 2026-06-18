@@ -70,7 +70,6 @@
     owner: "{{ vault_user }}"
     group: "{{ vault_group }}"
     mode: "{{ vault_config_file_mode }}"
-    backup: true
   no_log: true
   notify:
     - reload systemd daemon

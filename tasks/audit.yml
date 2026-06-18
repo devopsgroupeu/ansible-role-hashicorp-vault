@@ -21,6 +21,10 @@
 
 # ------------------------------------------------------------------------------
 # 2. Check which audit devices are already enabled.
+#    Audit-device configuration is cluster-wide (stored in Raft), so the list
+#    and the enable below run ONCE on the active/bootstrap node. Standby
+#    followers reject writes (and would redirect reads), so delegating to the
+#    bootstrap node is both correct and avoids per-follower failures.
 #    changed_when: false — read-only operation.
 #    no_log: true — VAULT_TOKEN in environment.
 # ------------------------------------------------------------------------------
@@ -36,6 +40,8 @@
   changed_when: false
   failed_when: __vault_audit_list_cmd['rc'] not in [0, 2]
   no_log: true
+  run_once: true
+  delegate_to: "{{ vault_init_bootstrap_node }}"
   when:
     - __vault_root_token is defined
     - __vault_root_token | length > 0
@@ -52,6 +58,7 @@
       {%- else -%}
         {{ {} }}
       {%- endif -%}
+  run_once: true
   when:
     - __vault_audit_list_cmd is defined
   tags: audit
@@ -76,6 +83,8 @@
   changed_when: __vault_audit_enable_cmd['rc'] == 0
   failed_when: __vault_audit_enable_cmd['rc'] != 0
   no_log: true
+  run_once: true
+  delegate_to: "{{ vault_init_bootstrap_node }}"
   when:
     - __vault_root_token is defined
     - __vault_root_token | length > 0
