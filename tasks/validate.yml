@@ -43,6 +43,17 @@
     quiet: true
   tags: always
 
+- name: Validate vault_tls_min_version is not greater than vault_tls_max_version
+  ansible.builtin.assert:
+    that:
+      - not (vault_tls_min_version == 'tls13' and vault_tls_max_version == 'tls12')
+    fail_msg: >-
+      vault_tls_min_version '{{ vault_tls_min_version }}' is greater than
+      vault_tls_max_version '{{ vault_tls_max_version }}'. The minimum TLS
+      version must not exceed the maximum.
+    quiet: true
+  tags: always
+
 - name: Validate vault_tls_cert_key_type choice
   ansible.builtin.assert:
     that:
