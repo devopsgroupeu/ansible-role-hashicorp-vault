@@ -60,9 +60,27 @@
 
 # --- Self-signed CA certificate -----------------------------------------------
 
+- name: Generate CA CSR (in memory)
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ vault_tls_dir }}/vault-ca-key.pem"
+    common_name: "Vault Role CA"
+    use_common_name_for_san: false
+    basic_constraints:
+      - "CA:TRUE"
+    basic_constraints_critical: true
+    key_usage:
+      - keyCertSign
+      - cRLSign
+      - digitalSignature
+    key_usage_critical: true
+  register: __vault_ca_csr
+  changed_when: false
+  tags: tls
+
 - name: Generate CA certificate (self-signed)
   community.crypto.x509_certificate:
     path: "{{ vault_tls_ca_file }}"
+    csr_content: "{{ __vault_ca_csr['csr'] }}"
     privatekey_path: "{{ vault_tls_dir }}/vault-ca-key.pem"
     provider: selfsigned
     selfsigned_not_before: "-1d"

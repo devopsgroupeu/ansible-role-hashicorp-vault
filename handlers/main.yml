@@ -12,6 +12,22 @@
   listen: "restart vault"
   when: not vault_config_only | bool
 
+# Wait for Vault API to be listening before sending SIGHUP (issue #27100).
+# Derives host:port from vault_listen_address; 0.0.0.0 → 127.0.0.1.
+# Runs first (definition order) when "reload vault" is notified.
+- name: Wait for Vault API port before reload
+  ansible.builtin.wait_for:
+    host: >-
+      {{
+        (vault_listen_address.split(':')[0] == '0.0.0.0')
+        | ternary('127.0.0.1', vault_listen_address.split(':')[0])
+      }}
+    port: "{{ vault_listen_address.split(':')[-1] | int }}"
+    state: started
+    timeout: 60
+  listen: "reload vault"
+  when: not vault_config_only | bool
+
 - name: Reload HashiCorp Vault
   ansible.builtin.systemd:
     name: vault

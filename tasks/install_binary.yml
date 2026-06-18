@@ -81,14 +81,9 @@
   changed_when: false
   tags: install
 
-- name: Set expected SHA256 checksum fact
-  ansible.builtin.set_fact:
-    __vault_expected_sha256: "{{ __vault_expected_checksum_line['stdout'].split()[0] }}"
-  tags: install
-
 - name: Verify zip checksum matches SHA256SUMS
   ansible.builtin.command: >-
-    sha256sum -c --ignore-missing
+    sha256sum -c
     {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
   args:
     chdir: "{{ __vault_tmpdir }}"
