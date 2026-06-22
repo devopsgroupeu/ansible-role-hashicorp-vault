@@ -74,7 +74,7 @@
 #   - All tasks touching the transit token run with no_log: true.
 #
 # Usage:
-#   ansible-playbook -i inventory/hosts examples/autounseal_transit.yml \
+#   ansible-playbook -i examples/inventory/vault_cluster.ini examples/autounseal_transit.yml \
 #     --vault-password-file ~/.vault-pass
 #
 # group_vars/vault/vault.yml (ansible-vault encrypted):

@@ -19,7 +19,7 @@
 #     (Raft mTLS requires clientAuth on the API cert).
 #
 # Usage:
-#   ansible-playbook -i inventory/hosts examples/raft_cluster.yml \
+#   ansible-playbook -i examples/inventory/vault_cluster.ini examples/raft_cluster.yml \
 #     --vault-password-file ~/.vault-pass
 #
 # After the run:

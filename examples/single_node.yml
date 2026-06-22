@@ -6,7 +6,7 @@
 #   vault-dev ansible_host=192.0.2.10
 #
 # Usage:
-#   ansible-playbook -i inventory/hosts examples/single_node.yml
+#   ansible-playbook -i examples/inventory/vault_cluster.ini examples/single_node.yml
 #
 # After the run the init file is at:
 #   {{ playbook_dir }}/.vault_init_vault-dev.json
