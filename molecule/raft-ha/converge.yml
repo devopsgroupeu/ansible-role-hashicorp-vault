@@ -31,8 +31,8 @@
       - vault3
 
     # Per-node addressing: each node advertises its own container hostname.
-    # vault_api_addr and vault_cluster_addr are overridden per-host via host_vars
-    # (see molecule/raft-ha/host_vars/). The defaults here are fallbacks.
+    # vault_api_addr and vault_cluster_addr are set via inventory_hostname so each
+    # node advertises itself; Docker DNS resolves the container name to its IP.
     vault_api_addr: "https://{{ inventory_hostname }}:8200"
     vault_cluster_addr: "https://{{ inventory_hostname }}:8201"
 

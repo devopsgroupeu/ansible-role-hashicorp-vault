@@ -352,3 +352,51 @@
         that: "'pid_file = \"/opt/vault/vault.pid\"' in vault_hcl_extra"
         fail_msg: >-
           vault.hcl missing top-level vault_extra_config key 'pid_file'.
+
+# ---------------------------------------------------------------------------
+# Variant: verify TLS-disabled path — tls_byo.yml must NOT run when
+# vault_tls_enabled: false (regression guard for the tasks/tls.yml fix).
+# ---------------------------------------------------------------------------
+
+- name: Converge TLS-disabled variant
+  hosts: all
+  gather_facts: true
+  vars:
+    vault_config_only: true
+    vault_raft_peers:
+      - vault-render
+      - vault-node-2
+      - vault-node-3
+    vault_tls_enabled: false
+    vault_tls_generate_certs: false
+    vault_api_addr: "http://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+  tasks:
+    - name: Include role for TLS-disabled variant
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+- name: Verify TLS-disabled vault.hcl renders tls_disable
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Slurp vault.hcl after TLS-disabled render
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.hcl
+      register: vault_hcl_notls_raw
+
+    - name: Decode TLS-disabled vault.hcl
+      ansible.builtin.set_fact:
+        vault_hcl_notls: "{{ vault_hcl_notls_raw['content'] | b64decode }}"
+
+    - name: Assert tls_disable is present when vault_tls_enabled=false
+      ansible.builtin.assert:
+        that: "'tls_disable = true' in vault_hcl_notls"
+        fail_msg: >-
+          vault.hcl missing 'tls_disable = true' when vault_tls_enabled=false.
+
+    - name: Assert no tls_cert_file when TLS disabled
+      ansible.builtin.assert:
+        that: "'tls_cert_file' not in vault_hcl_notls"
+        fail_msg: >-
+          vault.hcl contains tls_cert_file even though vault_tls_enabled=false.
