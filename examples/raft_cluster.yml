@@ -1,11 +1,17 @@
 ---
 # Three-node Raft cluster deployment — production with BYO TLS certificates.
 #
-# Inventory:
-#   [vault]
-#   vault1 ansible_host=192.0.2.11
-#   vault2 ansible_host=192.0.2.12
-#   vault3 ansible_host=192.0.2.13
+# Inventory (examples/inventory/vault_cluster.yml or equivalent):
+#   all:
+#     children:
+#       vault:
+#         hosts:
+#           vault1:
+#             ansible_host: 192.0.2.11
+#           vault2:
+#             ansible_host: 192.0.2.12
+#           vault3:
+#             ansible_host: 192.0.2.13
 #
 # Pre-requisites:
 #   - Place TLS material at vault_tls_{cert,key,ca}_file paths on all nodes
@@ -19,7 +25,7 @@
 #     (Raft mTLS requires clientAuth on the API cert).
 #
 # Usage:
-#   ansible-playbook -i examples/inventory/vault_cluster.ini examples/raft_cluster.yml \
+#   ansible-playbook -i examples/inventory/vault_cluster.yml examples/raft_cluster.yml \
 #     --vault-password-file ~/.vault-pass
 #
 # After the run:

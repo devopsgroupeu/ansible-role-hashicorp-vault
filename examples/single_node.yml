@@ -1,12 +1,16 @@
 ---
 # Single-node Vault deployment — dev/test with role-generated self-signed TLS.
 #
-# Inventory:
-#   [vault]
-#   vault-dev ansible_host=192.0.2.10
+# Inventory (examples/inventory/vault_cluster.yml or equivalent):
+#   all:
+#     children:
+#       vault:
+#         hosts:
+#           vault-dev:
+#             ansible_host: 192.0.2.10
 #
 # Usage:
-#   ansible-playbook -i examples/inventory/vault_cluster.ini examples/single_node.yml
+#   ansible-playbook -i examples/inventory/vault_cluster.yml examples/single_node.yml
 #
 # After the run the init file is at:
 #   {{ playbook_dir }}/.vault_init_vault-dev.json

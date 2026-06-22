@@ -8,11 +8,17 @@
 #     Encryption key: autounseal
 #     Token: orphan periodic token with no max TTL
 #
-#   This cluster (the "sealed" cluster):
-#     [vault]
-#     vault1 ansible_host=192.0.2.11
-#     vault2 ansible_host=192.0.2.12
-#     vault3 ansible_host=192.0.2.13
+#   This cluster (the "sealed" cluster) — examples/inventory/vault_cluster.yml or equivalent:
+#     all:
+#       children:
+#         vault:
+#           hosts:
+#             vault1:
+#               ansible_host: 192.0.2.11
+#             vault2:
+#               ansible_host: 192.0.2.12
+#             vault3:
+#               ansible_host: 192.0.2.13
 #
 # ==============================================================================
 # Unsealer Vault pre-requisites
@@ -74,7 +80,7 @@
 #   - All tasks touching the transit token run with no_log: true.
 #
 # Usage:
-#   ansible-playbook -i examples/inventory/vault_cluster.ini examples/autounseal_transit.yml \
+#   ansible-playbook -i examples/inventory/vault_cluster.yml examples/autounseal_transit.yml \
 #     --vault-password-file ~/.vault-pass
 #
 # group_vars/vault/vault.yml (ansible-vault encrypted):
