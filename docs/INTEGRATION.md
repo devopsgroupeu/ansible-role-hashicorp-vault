@@ -26,8 +26,6 @@ it fits into the OpenPrime on-premise stack alongside the RKE2 and HAProxy roles
 collections:
   - name: community.crypto
     version: ">=3.2.2"
-  - name: ansible.posix
-    version: ">=1.5.0"
 
 roles:
   - name: devopsgroupeu.hashicorp_vault
@@ -144,7 +142,7 @@ secrets integration for OpenPrime. It pulls secrets from Vault into Kubernetes
 
 ```yaml
 # ClusterSecretStore pointing at the Vault cluster
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
   name: vault-backend

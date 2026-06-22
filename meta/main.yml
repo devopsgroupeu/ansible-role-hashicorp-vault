@@ -47,4 +47,3 @@ dependencies: []
 
 collections:
   - community.crypto
-  - ansible.posix

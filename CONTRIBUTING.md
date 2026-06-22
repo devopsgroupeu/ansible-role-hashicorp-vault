@@ -61,7 +61,7 @@ Breaking changes: append `!` after the type (e.g. `feat!:`) and add a
 
 ## Code standards
 
-- FQCN for every module (`ansible.builtin.*`, `community.crypto.*`, `ansible.posix.*`).
+- FQCN for every module (`ansible.builtin.*`, `community.crypto.*`).
 - `loop:` not `with_*`; `loop_control.label` on every loop.
 - `include_tasks` (dynamic) for conditional file inclusion; never `import_tasks` + `when`.
 - `notify:` handlers; never `when: result.changed`.

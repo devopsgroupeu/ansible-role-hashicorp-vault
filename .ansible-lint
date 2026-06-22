@@ -1,7 +1,4 @@
 profile: production
-enable_list:
-  - no-log-password
-  - loop-var-prefix
 exclude_paths:
   - .github/
   - .ansible-lint
@@ -15,3 +12,6 @@ warn_list:
 skip_list:
   - experimental
   - yaml[line-length]
+enable_list:
+  - no-log-password
+  - loop-var-prefix

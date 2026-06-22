@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peer list non-empty, bootstrap node ∈ peers, BYO TLS file presence)
 - Galaxy-ready `meta/main.yml` (namespace `devopsgroupeu`, Apache-2.0,
   `min_ansible_version: "2.19"`, platforms: Ubuntu noble / Debian bookworm+trixie / EL 9)
-- `requirements.yml` (community.crypto >=3.2.2, ansible.posix >=1.5.0)
+- `requirements.yml` (community.crypto >=3.2.2)
 - `requirements.txt` (molecule, ansible-lint, yamllint pinned)
 - `handlers/main.yml`: Reload systemd daemon / Restart Vault / Reload Vault (SIGHUP)
 - `.ansible-lint` (profile: production; enable_list: no-log-password, loop-var-prefix)

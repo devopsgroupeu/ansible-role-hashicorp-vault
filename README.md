@@ -13,7 +13,7 @@ as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 ## Requirements
 
 - **Ansible:** 2.19 or later (`ansible-core >= 2.19`)
-- **Collections:** `community.crypto >= 3.2.2`, `ansible.posix >= 1.5.0`
+- **Collections:** `community.crypto >= 3.2.2`
   Install via: `ansible-galaxy collection install -r requirements.yml`
 - **Target OS:** Ubuntu 24.04 (noble), Debian 12/13 (bookworm/trixie), RHEL/Rocky/Alma 9
 - **Vault version:** 2.0.3 (default; override via `vault_version`)
@@ -240,7 +240,8 @@ ansible-role-hashicorp-vault/
 │   └── vault.service.j2
 ├── molecule/{default,render,raft-ha}/
 ├── examples/{single_node.yml,raft_cluster.yml,autounseal_transit.yml}
-├── docs/{CONFIGURATION.md,INTEGRATION.md,TROUBLESHOOTING.md}
+│   └── inventory/vault_cluster.yml
+├── docs/{ARCHITECTURE.md,CONFIGURATION.md,INTEGRATION.md,TROUBLESHOOTING.md}
 └── .github/workflows/{ci.yml,galaxy.yml}
 ```
 
