@@ -550,6 +550,7 @@ argument_specs:
         type: str
         required: false
         default: "info"
+        choices: [trace, debug, info, warn, error]
         description: Vault log verbosity level.
 
       vault_log_format:
