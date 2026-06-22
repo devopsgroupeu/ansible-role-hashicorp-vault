@@ -25,7 +25,7 @@ yamllint:
   before_script:
     - pip install yamllint
   script:
-    - yamllint defaults/ handlers/ tasks/ templates/ molecule/ meta/ examples/ docs/ .yamllint
+    - yamllint defaults/ handlers/ tasks/ templates/ molecule/ meta/ examples/ docs/ .yamllint .gitlab-ci.yml
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -91,6 +91,14 @@ molecule:default:ubuntu2404:
     - molecule test -s default
   variables:
     MOLECULE_DISTRO: ubuntu2404
+
+molecule:default:debian13:
+  extends: .molecule_test
+  script:
+    - source venv/bin/activate
+    - molecule test -s default
+  variables:
+    MOLECULE_DISTRO: debian13
 
 molecule:default:rockylinux9:
   extends: .molecule_test

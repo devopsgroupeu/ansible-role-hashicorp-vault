@@ -19,7 +19,7 @@ discussions, or pull requests.
 
 ### Report Privately
 
-Email: **info@devopsgroup.sk**
+Email: **security@devopsgroup.sk**
 
 Please include:
 
