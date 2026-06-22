@@ -3,15 +3,17 @@
 # TLS: generate (community.crypto ownca) or validate BYO + OS trust store
 # ==============================================================================
 
-# Dispatch: generated certs vs. BYO
+# Dispatch: generated certs vs. BYO — both branches are gated on vault_tls_enabled.
+# Without the outer guard, tls_byo.yml would assert cert/key/CA existence even
+# when TLS is disabled (vault_tls_enabled: false), causing a hard false failure.
 - name: Generate TLS certificates via community.crypto
   ansible.builtin.include_tasks: tls_generate.yml
-  when: vault_tls_generate_certs | bool
+  when: vault_tls_enabled | bool and vault_tls_generate_certs | bool
   tags: tls
 
 - name: Validate and permission BYO TLS certificates
   ansible.builtin.include_tasks: tls_byo.yml
-  when: not vault_tls_generate_certs | bool
+  when: vault_tls_enabled | bool and not vault_tls_generate_certs | bool
   tags: tls
 
 # --- OS trust store -----------------------------------------------------------

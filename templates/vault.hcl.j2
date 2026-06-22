@@ -26,10 +26,11 @@ storage "raft" {
   {{ key }} = "{{ value }}"
 {% endif %}
 {% endfor %}
+{%- set _api_port = vault_listen_address.split(':')[-1] -%}
 {% for peer in __vault_retry_join_peers %}
 
   retry_join {
-    leader_api_addr         = "https://{{ peer['addr'] }}:8200"
+    leader_api_addr         = "https://{{ peer['addr'] }}:{{ _api_port }}"
     leader_tls_servername   = "{{ vault_tls_leader_servername }}"
     leader_ca_cert_file     = "{{ vault_tls_ca_file }}"
     leader_client_cert_file = "{{ vault_tls_cert_file }}"
