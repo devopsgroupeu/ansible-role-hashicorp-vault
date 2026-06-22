@@ -1,0 +1,42 @@
+---
+name: Feature Request
+description: Suggest a new feature or improvement for the role
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Please describe your use case
+        clearly so we can evaluate the request.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: >
+        Is your feature request related to a problem? Describe what you are
+        trying to accomplish and why the current role does not support it.
+      placeholder: "I'm trying to ... but the role currently doesn't support ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or change you would like to see.
+      placeholder: "Add a variable `vault_xxx` that ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative solutions or workarounds you have considered.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other context, links, or screenshots about the feature request here.

@@ -1,0 +1,62 @@
+---
+name: Bug Report
+description: File a bug report to help us improve the role
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report.
+        Please provide as much detail as possible so we can reproduce and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: "When I run the role with ... I get ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Set variable `vault_tls_enabled: true`
+        2. Run playbook against ...
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Please fill in the relevant details.
+      value: |
+        - Role version:
+        - Vault version (`vault_version`):
+        - Ansible version:
+        - OS / distribution:
+        - Install method (`vault_install_method`):
+        - HA (number of vault nodes):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste any relevant Ansible output or error messages (use `-vvv` for verbose output).
+      render: shell
