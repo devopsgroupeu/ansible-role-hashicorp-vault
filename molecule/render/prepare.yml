@@ -8,18 +8,23 @@
   hosts: all
   gather_facts: false
   tasks:
+    - name: Detect available package manager
+      ansible.builtin.raw: command -v apt-get >/dev/null 2>&1 && echo apt || echo dnf
+      register: _pkg_mgr
+      changed_when: false
+
     - name: Install minimal dependencies (Debian/Ubuntu)
       ansible.builtin.raw: >-
         apt-get update -qq &&
         apt-get install -y -qq --no-install-recommends python3 python3-apt passwd procps
       changed_when: true
-      when: ansible_os_family is not defined or ansible_os_family != 'RedHat'
+      when: "'apt' in _pkg_mgr.stdout"
 
     - name: Install minimal dependencies (RHEL/Rocky)
       ansible.builtin.raw: >-
         dnf install -y python3 passwd procps-ng
       changed_when: true
-      when: ansible_os_family is defined and ansible_os_family == 'RedHat'
+      when: "'dnf' in _pkg_mgr.stdout"
 
     - name: Gather facts after bootstrap
       ansible.builtin.setup:
