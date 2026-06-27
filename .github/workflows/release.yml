@@ -1,0 +1,26 @@
+---
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release from drafted notes
+        uses: release-drafter/release-drafter@v7
+        with:
+          config-name: RELEASE_DRAFTER.yml
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          publish: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
