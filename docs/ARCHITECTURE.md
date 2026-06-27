@@ -19,7 +19,7 @@ flowchart TD
         C2[Client 2]
     end
 
-    LB["HAProxy VIP\n:8200 / :443\n(devopsgroupeu.haproxy-keepalived)"]
+    LB["Load balancer VIP\n:8200 / :443"]
 
     subgraph vault_cluster["Vault Raft Cluster  [vault]"]
         V1["vault1 (active)\napi_addr :8200\ncluster_addr :8201"]
@@ -101,18 +101,3 @@ sequenceDiagram
   and rekey.
 - All tasks that handle unseal/recovery keys and the root token run with
   `no_log: true`. Never add debug tasks that print these values.
-
----
-
-## Cross-role integration
-
-In the full OpenPrime stack this role sits between `devopsgroupeu.haproxy-keepalived`
-(which provides the VIP that Vault clients and `retry_join` target) and
-`devopsgroupeu.rke2` (which runs External Secrets Operator consuming Vault):
-
-```
-hetzner (provision) → haproxy/keepalived (VIP) → vault (Raft) → rke2 → ESO/Vault Agent
-```
-
-See [`docs/INTEGRATION.md`](INTEGRATION.md) for the cross-role play structure and
-inventory hand-off.

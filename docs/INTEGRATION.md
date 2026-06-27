@@ -1,15 +1,13 @@
 # Integration Guide
 
 How to consume the `devopsgroupeu.hashicorp-vault` role in other projects and how
-it fits into the OpenPrime on-premise stack alongside the RKE2 and HAProxy roles.
+to wire the Vault cluster it produces into your platform as a secrets backend.
 
 ---
 
 ## Table of Contents
 
 - [Consuming the role via requirements.yml](#consuming-the-role-via-requirementsyml)
-- [OpenPrime on-premise context](#openprime-on-premise-context)
-- [Relationship to sibling roles](#relationship-to-sibling-roles)
 - [Vault as a secrets backend for Kubernetes](#vault-as-a-secrets-backend-for-kubernetes)
 - [External Secrets Operator (ESO)](#external-secrets-operator-eso)
 - [Vault Agent](#vault-agent)
@@ -61,49 +59,6 @@ or use `ANSIBLE_ROLES_PATH` in the environment.
 
 ---
 
-## OpenPrime on-premise context
-
-The `hashicorp_vault` role is the **secrets backend** for the OpenPrime on-premise
-platform. It is deployed before the application layer and before the Kubernetes
-cluster's secrets operators are configured. The typical provisioning order is:
-
-1. **Network / load-balancing tier** — `devopsgroupeu.haproxy-keepalived` provides
-   the VIP that Vault clients resolve. The Vault cluster sits behind the VIP.
-2. **Vault cluster** — `devopsgroupeu.hashicorp-vault` installs, configures, and
-   initialises Vault on 3 nodes. Init output (root token + unseal/recovery keys) is
-   saved to the Ansible controller, encrypted with `ansible-vault`.
-3. **Kubernetes cluster** — `devopsgroupeu.rke2` provisions the RKE2 cluster.
-   Vault is registered as a secrets backend during or after cluster bootstrapping.
-4. **Secrets operators** — External Secrets Operator (ESO) or Vault Agent Injector
-   are deployed into the cluster; they are configured to authenticate against Vault
-   using Kubernetes service accounts.
-
----
-
-## Relationship to sibling roles
-
-### `devopsgroupeu.haproxy-keepalived`
-
-HAProxy fronts the Vault API (port 8200) with a VIP. The Vault role's
-`vault_api_addr` should point to the HAProxy VIP (not an individual node IP):
-
-```yaml
-# group_vars/vault/main.yml
-vault_api_addr: "https://vault.example.internal:8200"
-vault_tls_leader_servername: "vault.example.internal"
-```
-
-The TLS certificate must carry `vault.example.internal` as a DNS SAN. HAProxy
-forwards TCP (mode tcp) without TLS termination so that Vault handles its own TLS.
-
-### `devopsgroupeu.rke2`
-
-The RKE2 role provisions the Kubernetes cluster. Vault integration happens
-post-cluster via either the External Secrets Operator or the Vault Agent Injector.
-The Vault role does not modify the Kubernetes cluster directly.
-
----
-
 ## Vault as a secrets backend for Kubernetes
 
 After the Vault role completes, configure the Kubernetes authentication method:
@@ -112,10 +67,10 @@ After the Vault role completes, configure the Kubernetes authentication method:
 # Enable the Kubernetes auth method
 vault auth enable kubernetes
 
-# Configure it with the RKE2 cluster endpoint
+# Configure it with the Kubernetes cluster endpoint
 vault write auth/kubernetes/config \
   kubernetes_host="https://$(kubectl config view --raw -o json | jq -r '.clusters[0].cluster.server')" \
-  kubernetes_ca_cert=@/var/lib/rancher/rke2/server/tls/server-ca.crt
+  kubernetes_ca_cert=@/path/to/kubernetes-ca.crt  # your cluster's CA cert
 
 # Create a policy for the secrets operator
 vault policy write eso-read - <<'EOF'
@@ -136,8 +91,8 @@ vault write auth/kubernetes/role/eso \
 
 ## External Secrets Operator (ESO)
 
-[External Secrets Operator](https://external-secrets.io/) is the preferred
-secrets integration for OpenPrime. It pulls secrets from Vault into Kubernetes
+[External Secrets Operator](https://external-secrets.io/) is a common
+secrets integration for Kubernetes. It pulls secrets from Vault into Kubernetes
 `Secret` objects.
 
 ```yaml

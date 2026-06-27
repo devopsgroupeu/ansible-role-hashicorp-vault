@@ -20,6 +20,6 @@ This Code of Conduct applies within all project spaces, including GitHub reposit
 
 ## 📩 Enforcement
 
-If you experience or witness behavior that violates this Code of Conduct, please report it to the maintainers at [security@devopsgroup.sk]. Reports will be treated with confidentiality and seriousness. 🔒
+If you experience or witness behavior that violates this Code of Conduct, please report it to the maintainers at [info@devopsgroup.sk]. Reports will be treated with confidentiality and seriousness. 🔒
 
 This Code of Conduct is adapted from the [Contributor Covenant version 2.1.](https://www.contributor-covenant.org/)

@@ -74,7 +74,7 @@ Breaking changes: append `!` after the type (e.g. `feat!:`) and add a
 ## Security issues
 
 Please do **not** open a public issue for security vulnerabilities.
-Report privately via **SECURITY.md**.
+Report them privately by email at info@devopsgroup.sk.
 
 ## Community
 
