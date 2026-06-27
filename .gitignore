@@ -22,10 +22,9 @@ __pycache__/
 
 # Molecule
 .molecule/
-.cache/
-
-# Init output (contains unseal keys — never commit)
-.vault_init_*.json
 
 # Logs
 *.log
+
+# Init output (contains unseal keys — never commit)
+.vault_init_*.json
