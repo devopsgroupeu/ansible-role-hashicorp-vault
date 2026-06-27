@@ -253,12 +253,6 @@ ansible-role-hashicorp-vault/
 
 ---
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
-
----
-
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
@@ -269,7 +263,7 @@ Read our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+See the [GitHub Releases](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/releases) page for release history.
 
 ## License
 
