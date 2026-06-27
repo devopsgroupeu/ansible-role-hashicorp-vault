@@ -39,7 +39,7 @@
   become: true
   gather_facts: true
   roles:
-    - role: devopsgroupeu.hashicorp_vault
+    - role: devopsgroupeu.hashicorp-vault
       vars:
         # ---- TLS (BYO — production default) ------------------------------------
         vault_tls_generate_certs: false

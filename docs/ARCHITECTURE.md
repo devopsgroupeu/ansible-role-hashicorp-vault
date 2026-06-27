@@ -19,7 +19,7 @@ flowchart TD
         C2[Client 2]
     end
 
-    LB["HAProxy VIP\n:8200 / :443\n(devopsgroupeu.haproxy_keepalived)"]
+    LB["HAProxy VIP\n:8200 / :443\n(devopsgroupeu.haproxy-keepalived)"]
 
     subgraph vault_cluster["Vault Raft Cluster  [vault]"]
         V1["vault1 (active)\napi_addr :8200\ncluster_addr :8201"]
@@ -106,7 +106,7 @@ sequenceDiagram
 
 ## Cross-role integration
 
-In the full OpenPrime stack this role sits between `devopsgroupeu.haproxy_keepalived`
+In the full OpenPrime stack this role sits between `devopsgroupeu.haproxy-keepalived`
 (which provides the VIP that Vault clients and `retry_join` target) and
 `devopsgroupeu.rke2` (which runs External Secrets Operator consuming Vault):
 

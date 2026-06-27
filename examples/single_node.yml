@@ -22,7 +22,7 @@
   become: true
   gather_facts: true
   roles:
-    - role: devopsgroupeu.hashicorp_vault
+    - role: devopsgroupeu.hashicorp-vault
       vars:
         # ---- TLS ----------------------------------------------------------------
         # Role generates a self-signed CA + cert; convenient for dev/test.

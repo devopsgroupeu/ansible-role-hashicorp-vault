@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Common issues and resolutions for the `devopsgroupeu.hashicorp_vault` role.
+Common issues and resolutions for the `devopsgroupeu.hashicorp-vault` role.
 
 ---
 

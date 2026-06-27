@@ -1,6 +1,6 @@
 # Integration Guide
 
-How to consume the `devopsgroupeu.hashicorp_vault` role in other projects and how
+How to consume the `devopsgroupeu.hashicorp-vault` role in other projects and how
 it fits into the OpenPrime on-premise stack alongside the RKE2 and HAProxy roles.
 
 ---
@@ -28,7 +28,7 @@ collections:
     version: ">=3.2.2"
 
 roles:
-  - name: devopsgroupeu.hashicorp_vault
+  - name: devopsgroupeu.hashicorp-vault
     version: "1.0.0"
 ```
 
@@ -44,7 +44,7 @@ ansible-galaxy role install -r requirements.yml
 ```yaml
 # requirements.yml — git source
 roles:
-  - name: devopsgroupeu.hashicorp_vault
+  - name: devopsgroupeu.hashicorp-vault
     src: https://github.com/devopsgroupeu/ansible-role-hashicorp-vault.git
     version: "feat/galaxy-readiness-v2"   # or a git tag: v1.0.0
     scm: git
@@ -67,9 +67,9 @@ The `hashicorp_vault` role is the **secrets backend** for the OpenPrime on-premi
 platform. It is deployed before the application layer and before the Kubernetes
 cluster's secrets operators are configured. The typical provisioning order is:
 
-1. **Network / load-balancing tier** — `devopsgroupeu.haproxy_keepalived` provides
+1. **Network / load-balancing tier** — `devopsgroupeu.haproxy-keepalived` provides
    the VIP that Vault clients resolve. The Vault cluster sits behind the VIP.
-2. **Vault cluster** — `devopsgroupeu.hashicorp_vault` installs, configures, and
+2. **Vault cluster** — `devopsgroupeu.hashicorp-vault` installs, configures, and
    initialises Vault on 3 nodes. Init output (root token + unseal/recovery keys) is
    saved to the Ansible controller, encrypted with `ansible-vault`.
 3. **Kubernetes cluster** — `devopsgroupeu.rke2` provisions the RKE2 cluster.
@@ -82,7 +82,7 @@ cluster's secrets operators are configured. The typical provisioning order is:
 
 ## Relationship to sibling roles
 
-### `devopsgroupeu.haproxy_keepalived`
+### `devopsgroupeu.haproxy-keepalived`
 
 HAProxy fronts the Vault API (port 8200) with a VIP. The Vault role's
 `vault_api_addr` should point to the HAProxy VIP (not an individual node IP):

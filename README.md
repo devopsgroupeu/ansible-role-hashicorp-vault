@@ -5,7 +5,7 @@ as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 (Shamir + auto-unseal), systemd hardening, audit devices, and Prometheus telemetry.
 
 [![CI](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/actions/workflows/ci.yml/badge.svg)](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/actions/workflows/ci.yml)
-[![Ansible Galaxy](https://img.shields.io/badge/galaxy-devopsgroupeu.hashicorp__vault-blue)](https://galaxy.ansible.com/devopsgroupeu/hashicorp_vault)
+[![Ansible Galaxy](https://img.shields.io/badge/Ansible%20Galaxy-devopsgroupeu.hashicorp--vault-blue?logo=ansible)](https://galaxy.ansible.com/ui/standalone/roles/devopsgroupeu/hashicorp-vault/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ---
@@ -28,7 +28,7 @@ as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
-ansible-galaxy role install devopsgroupeu.hashicorp_vault
+ansible-galaxy role install devopsgroupeu.hashicorp-vault
 ```
 
 Or pin a version from Git:
@@ -36,7 +36,7 @@ Or pin a version from Git:
 ```yaml
 # requirements.yml
 roles:
-  - name: devopsgroupeu.hashicorp_vault
+  - name: devopsgroupeu.hashicorp-vault
     src: https://github.com/devopsgroupeu/ansible-role-hashicorp-vault.git
     version: "v1.0.0"
     scm: git
@@ -49,7 +49,7 @@ roles:
   hosts: vault
   become: true
   roles:
-    - role: devopsgroupeu.hashicorp_vault
+    - role: devopsgroupeu.hashicorp-vault
       vars:
         vault_tls_generate_certs: true
         vault_init_key_shares: 1
@@ -64,7 +64,7 @@ roles:
   hosts: vault           # [vault] group must contain all 3 hosts
   become: true
   roles:
-    - role: devopsgroupeu.hashicorp_vault
+    - role: devopsgroupeu.hashicorp-vault
       vars:
         vault_tls_generate_certs: false
         vault_tls_cert_file: /opt/vault/tls/vault-cert.pem
@@ -83,7 +83,7 @@ roles:
   hosts: vault
   become: true
   roles:
-    - role: devopsgroupeu.hashicorp_vault
+    - role: devopsgroupeu.hashicorp-vault
       vars:
         vault_tls_generate_certs: false
         vault_seal_type: transit

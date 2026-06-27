@@ -50,6 +50,6 @@ First Galaxy-published stable release (all phases complete).
 
 ## Links
 
-- [Ansible Galaxy](https://galaxy.ansible.com/devopsgroupeu/hashicorp_vault)
+- [Ansible Galaxy](https://galaxy.ansible.com/devopsgroupeu/hashicorp-vault)
 - [Repository](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault)
 - [Issues](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/issues)
