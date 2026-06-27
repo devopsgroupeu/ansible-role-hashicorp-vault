@@ -1,12 +1,18 @@
-# ansible-role-hashicorp-vault
-
-Production-ready Ansible role for installing and configuring **HashiCorp Vault** (OSS)
-as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
-(Shamir + auto-unseal), systemd hardening, audit devices, and Prometheus telemetry.
+# Ansible Role - HashiCorp Vault
 
 [![CI](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/actions/workflows/ci.yml/badge.svg)](https://github.com/devopsgroupeu/ansible-role-hashicorp-vault/actions/workflows/ci.yml)
 [![Ansible Galaxy](https://img.shields.io/badge/Ansible%20Galaxy-devopsgroupeu.hashicorp--vault-blue?logo=ansible)](https://galaxy.ansible.com/ui/standalone/roles/devopsgroupeu/hashicorp-vault/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+![GitHub Forks](https://img.shields.io/github/forks/devopsgroupeu/ansible-role-hashicorp-vault)
+![GitHub Stars](https://img.shields.io/github/stars/devopsgroupeu/ansible-role-hashicorp-vault)
+![GitHub Issues](https://img.shields.io/github/issues/devopsgroupeu/ansible-role-hashicorp-vault)
+
+[![LinkedIn](https://img.shields.io/badge/linkedin-%230077B5.svg?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/company/devopsgroup8/)
+![HashiCorp Vault](https://img.shields.io/badge/HashiCorp%20Vault-FFEC6E?logo=vault&logoColor=000&style=for-the-badge)
+
+Production-ready Ansible role for installing and configuring **HashiCorp Vault** (OSS)
+as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
+(Shamir + auto-unseal), systemd hardening, audit devices, and Prometheus telemetry.
 
 ---
 
