@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Publish release from drafted notes
-        uses: release-drafter/release-drafter@v7
+        uses: release-drafter/release-drafter@4d75298e00d9e34c483e5ff8c68d0ea1c1940c1e  # v7
         with:
           config-name: RELEASE_DRAFTER.yml
           tag: ${{ github.ref_name }}

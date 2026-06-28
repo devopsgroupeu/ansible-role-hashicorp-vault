@@ -13,6 +13,17 @@
     quiet: true
   tags: always
 
+- name: Validate vault_arch is a supported architecture
+  ansible.builtin.assert:
+    that:
+      - vault_arch in ['amd64', 'arm64']
+    fail_msg: >-
+      Unsupported architecture '{{ ansible_architecture }}' (resolved
+      vault_arch='{{ vault_arch }}'). This role supports amd64 and arm64 only.
+      Override vault_arch explicitly if your platform uses a different value.
+    quiet: true
+  tags: always
+
 - name: Validate vault_seal_type choice
   ansible.builtin.assert:
     that:
@@ -92,6 +103,46 @@
       vault_init_bootstrap_node '{{ vault_init_bootstrap_node }}' is not in
       vault_raft_peers {{ vault_raft_peers }}. The bootstrap node must be a
       member of the peer list.
+    quiet: true
+  tags: always
+
+- name: Validate vault_init_key_threshold does not exceed vault_init_key_shares
+  ansible.builtin.assert:
+    that:
+      - (vault_init_key_threshold | int) <= (vault_init_key_shares | int)
+    fail_msg: >-
+      vault_init_key_threshold ({{ vault_init_key_threshold }}) must not exceed
+      vault_init_key_shares ({{ vault_init_key_shares }}).
+    quiet: true
+  tags: always
+
+- name: Validate vault_init_recovery_threshold does not exceed vault_init_recovery_shares
+  ansible.builtin.assert:
+    that:
+      - (vault_init_recovery_threshold | int) <= (vault_init_recovery_shares | int)
+    fail_msg: >-
+      vault_init_recovery_threshold ({{ vault_init_recovery_threshold }}) must
+      not exceed vault_init_recovery_shares ({{ vault_init_recovery_shares }}).
+    quiet: true
+  tags: always
+
+- name: Validate init output encryption has a password file when encryption is requested
+  when:
+    - vault_init | bool
+    - not vault_config_only | bool
+    - vault_init_encrypt_output | bool
+  ansible.builtin.assert:
+    that:
+      - vault_init_encrypt_password_file | length > 0
+    fail_msg: >-
+      vault_init_encrypt_output is true but vault_init_encrypt_password_file is
+      empty. The init file (root token + unseal/recovery keys) would be written
+      in plaintext to {{ vault_init_output_path }} on the Ansible controller.
+      This precondition runs BEFORE 'vault operator init', so the cluster is
+      never initialized into an unrecoverable (keys-lost) state. Set
+      vault_init_encrypt_password_file to a controller-side ansible-vault
+      password file, or set vault_init_encrypt_output: false to accept
+      plaintext storage.
     quiet: true
   tags: always
 

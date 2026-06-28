@@ -188,6 +188,52 @@
 #    AND vault_init_encrypt_password_file is set).
 # ------------------------------------------------------------------------------
 
+- name: Fail when init encryption requested but no password file is set
+  ansible.builtin.fail:
+    msg: >-
+      vault_init_encrypt_output is true but vault_init_encrypt_password_file is
+      not set. Refusing to write the init file (root token + unseal/recovery
+      keys) in plaintext to {{ vault_init_output_path }} on the Ansible
+      controller. Set vault_init_encrypt_password_file to a controller-side
+      ansible-vault password file, or explicitly set
+      vault_init_encrypt_output: false to accept plaintext storage.
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - __vault_init_json is defined
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length == 0
+  tags: init_unseal
+
+- name: Stat controller init output directory
+  ansible.builtin.stat:
+    path: "{{ vault_init_output_path | dirname }}"
+  register: _vault_init_dir
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - __vault_init_json is defined
+  tags: init_unseal
+
+# Only create (and lock down to 0700) the directory when it does not already
+# exist. Never chmod a pre-existing parent — it may be a shared system dir such
+# as /tmp that the controller user cannot (and must not) restrict. The init
+# file itself is always written 0600 below.
+- name: Ensure controller init output directory exists (mode 0700)
+  ansible.builtin.file:
+    path: "{{ vault_init_output_path | dirname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - __vault_init_json is defined
+    - not _vault_init_dir.stat.exists
+  tags: init_unseal
+
 - name: Write init JSON to controller (mode 0600)
   ansible.builtin.copy:
     content: "{{ __vault_init_json | to_nice_json }}"
@@ -235,22 +281,6 @@
     - vault_init_encrypt_output | bool
     - vault_init_encrypt_password_file | length > 0
     - __vault_init_file_header['stdout'] | default('') != '$ANSIBLE_VAULT'
-  tags: init_unseal
-
-- name: Warn that init file is stored plaintext when no password file is set
-  ansible.builtin.debug:
-    msg: >-
-      vault_init_encrypt_output is true but vault_init_encrypt_password_file is
-      not set — the init file at {{ vault_init_output_path }} is stored plaintext
-      (mode 0600) on the Ansible controller. Set vault_init_encrypt_password_file
-      to a password file path to enable ansible-vault encryption.
-  delegate_to: localhost
-  become: false
-  run_once: true
-  when:
-    - __vault_init_json is defined
-    - vault_init_encrypt_output | bool
-    - vault_init_encrypt_password_file | length == 0
   tags: init_unseal
 
 # ------------------------------------------------------------------------------

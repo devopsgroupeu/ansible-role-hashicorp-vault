@@ -54,13 +54,13 @@
       means any form of electronic, verbal, or written communication sent
       to the Licensor or its representatives, including but not limited to
       communication on electronic mailing lists, source code control systems,
-      and issue systems that are managed by, or on behalf of, the
-      Licensor for the discussing and improving the Work, but
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
       excluding communication that is conspicuously marked or otherwise
       designated in writing by the copyright owner as "Not a Contribution."
 
       "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by the Licensor and
+      on behalf of whom a Contribution has been received by Licensor and
       subsequently incorporated within the Work.
 
    2. Grant of Copyright License. Subject to the terms and conditions of
@@ -159,16 +159,16 @@
       result of this License or out of the use or inability to use the
       Work (including but not limited to damages for loss of goodwill,
       work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor has
-      been advised of the possibility of such damages.
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
 
    9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, you may choose to offer,
+      the Work or Derivative Works thereof, You may choose to offer,
       and charge a fee for, acceptance of support, warranty, indemnity,
       or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, you may act only
-      on your own behalf and on your sole responsibility, not on behalf
-      of any other Contributor, and only if you agree to indemnify,
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
       defend, and hold each Contributor harmless for any liability
       incurred by, or claims asserted against, such Contributor by reason
       of your accepting any such warranty or additional liability.
@@ -186,7 +186,7 @@
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright 2026 DevOpsGroup
+   Copyright 2025 DevOpsGroup
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
