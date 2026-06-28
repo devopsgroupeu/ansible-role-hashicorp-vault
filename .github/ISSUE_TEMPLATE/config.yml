@@ -1,1 +1,5 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and support
+    url: mailto:info@devopsgroup.sk
+    about: For questions, support, or to privately report a security issue, email us instead of opening an issue.

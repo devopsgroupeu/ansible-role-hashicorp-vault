@@ -2,7 +2,7 @@
 galaxy_info:
   author: DevOpsGroup
   company: DevOpsGroup s.r.o
-  description: |
+  description: >
     Production-ready Ansible role for installing and configuring HashiCorp Vault
     as a TLS-enabled, Raft-integrated-storage HA cluster with idempotent
     init/unseal (Shamir + auto-unseal), systemd hardening, audit devices,
@@ -44,6 +44,3 @@ galaxy_info:
         - "9"
 
 dependencies: []
-
-collections:
-  - community.crypto
