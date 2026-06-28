@@ -130,7 +130,7 @@ Key variables to be aware of:
 | `vault_seal_type` | `"shamir"` | Change to `transit`/`awskms`/`azurekeyvault`/`gcpckms` for auto-unseal |
 | `vault_raft_peers` | `groups['vault']` | All nodes in the `[vault]` inventory group |
 | `vault_init_bootstrap_node` | `vault_raft_peers[0]` | Node where `vault operator init` runs |
-| `vault_init_output_path` | `{{ playbook_dir }}/.vault_init_…json` | Mode `0600`; optionally encrypted |
+| `vault_init_output_path` | `~/.vault/.vault_init_…json` | Controller-side (outside the repo), mode `0600`; optionally encrypted |
 | `vault_init_encrypt_output` | `true` | Encrypt init JSON with `ansible-vault` |
 | `vault_disable_mlock` | `true` | Required for Raft/BoltDB mmap |
 | `vault_manage_swap` | `true` | `swapoff -a` + purge fstab |
@@ -156,9 +156,15 @@ false`, the default) for all production deployments.
 ### Init output
 
 The init file (`vault_init_output_path`) is saved mode `0600` on the Ansible
-controller and optionally encrypted with `ansible-vault encrypt`
-(`vault_init_encrypt_output: true`, the default). **Never commit this file.**
-The filename includes `vault_cluster_id` to prevent multi-cluster overwrites.
+controller, by default under `~/.vault/` (outside any playbook/repo directory)
+so init secrets never land in a consumer's git repository. When
+`vault_init_encrypt_output: true` (the default), the role **fails before writing
+any init material** unless `vault_init_encrypt_password_file` is set — it never
+writes the root token and unseal/recovery keys in plaintext by accident. Set
+`vault_init_encrypt_output: false` to intentionally store the file unencrypted.
+**Never commit this file**; if you relocate it into a repo, add a `.gitignore`
+entry for `.vault_init_*`. The filename includes `vault_cluster_id` to prevent
+multi-cluster overwrites.
 
 ### Unseal keys vs recovery keys
 
@@ -195,6 +201,15 @@ mmap). With mlock disabled, key material may be written to swap. The role runs
 The daemon-reload, restart, and reload handlers call `ansible.builtin.systemd`
 which requires root. They rely on the consuming play declaring `become: true` at
 the play level.
+
+### HA restart behaviour
+
+A config change (e.g. to `vault.hcl`) notifies the `restart vault` handler, which
+restarts **all** cluster nodes in the same run. Vault starts **sealed**, so a
+cluster-wide config change causes a simultaneous reseal and a brief outage; the
+role re-unseals the nodes later in the same run (using the saved init file). For
+zero-downtime changes in production, serialize the run one node at a time (e.g.
+`serial: 1` on the play, or `--limit` per node) so only one node reseals at a time.
 
 ---
 

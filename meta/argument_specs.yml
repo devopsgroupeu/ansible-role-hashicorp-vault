@@ -78,8 +78,10 @@ argument_specs:
       vault_arch:
         type: str
         required: false
-        default: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
-        description: CPU architecture string used in repo and binary download paths.
+        default: "{{ {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(ansible_architecture, '') }}"
+        description: >
+          CPU architecture string used in repo and binary download paths.
+          amd64/arm64 only; other architectures are rejected by validate.yml.
 
       # ---- Paths / users ----
       vault_config_dir:
@@ -494,8 +496,10 @@ argument_specs:
       vault_init_output_path:
         type: str
         required: false
-        default: "{{ playbook_dir }}/.vault_init_{{ vault_cluster_id }}.json"
-        description: Controller-side path for the init JSON file (mode 0600).
+        default: "{{ '~/.vault' | expanduser }}/.vault_init_{{ vault_cluster_id }}.json"
+        description: >
+          Controller-side path for the init JSON file (mode 0600). Defaults
+          under the controller user's home, outside any playbook/repo directory.
 
       vault_init_encrypt_output:
         type: bool
@@ -509,9 +513,11 @@ argument_specs:
         default: ""
         description: >
           Path to a password file on the Ansible controller used with
-          'ansible-vault encrypt --vault-password-file'. Encryption is skipped
-          (with a warning) when this is empty, avoiding interactive prompts that
-          hang unattended runs. Required when vault_init_encrypt_output=true.
+          'ansible-vault encrypt --vault-password-file'. Required when
+          vault_init_encrypt_output=true: the role fails before writing any init
+          material if encryption is requested without this file, instead of
+          storing the root token and keys in plaintext. Set
+          vault_init_encrypt_output=false to intentionally allow plaintext.
 
       vault_cluster_id:
         type: str

@@ -29,7 +29,8 @@
 #     --vault-password-file ~/.vault-pass
 #
 # After the run:
-#   - Init file: {{ playbook_dir }}/.vault_init_vault1.json (encrypted)
+#   - Init file: ~/.vault/.vault_init_vault1.json on the controller (encrypted
+#     when vault_init_encrypt_password_file is set; mode 0600 either way)
 #   - Unseal: the role unseals all nodes automatically using the generated shares
 #   - Rotate secrets at your earliest opportunity; store unseal keys in a
 #     hardened secrets manager.

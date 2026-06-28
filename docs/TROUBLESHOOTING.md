@@ -263,27 +263,25 @@ instead of `setcap` to survive binary replacements.
 
 ---
 
-## Init output written unencrypted / encryption skipped
+## Init fails: encryption requested but no password file set
 
-**Symptom:** The init file appears at `vault_init_output_path` (mode `0600`) but
-is stored as plaintext JSON rather than `ansible-vault`-encrypted ciphertext. The
-play emits a debug warning:
+**Symptom:** The play fails on the bootstrap node, before the init file is
+written, with:
 
 ```
 vault_init_encrypt_output is true but vault_init_encrypt_password_file is
-not set — the init file at <path> is stored plaintext (mode 0600) on the
-Ansible controller. Set vault_init_encrypt_password_file to a password file
-path to enable ansible-vault encryption.
+not set. Refusing to write the init file (root token + unseal/recovery keys)
+in plaintext to <path> on the Ansible controller. Set
+vault_init_encrypt_password_file to a controller-side ansible-vault password
+file, or explicitly set vault_init_encrypt_output: false to accept plaintext
+storage.
 ```
 
 **Cause:** `vault_init_encrypt_output: true` (the default) but
-`vault_init_encrypt_password_file` is empty (also the default). When no password
-file path is provided, the role deliberately skips the `ansible-vault encrypt` step
-and emits the debug warning rather than hanging an unattended run waiting for an
-interactive password prompt.
-
-The init file **is** written (mode `0600`, owner of the Ansible controller process)
-— only encryption is skipped.
+`vault_init_encrypt_password_file` is empty (also the default). The role
+**fails closed**: rather than silently writing the root token and unseal/recovery
+keys as plaintext JSON, it aborts *before* any init material is written to the
+controller.
 
 **Fix:** provide the password file path to enable encryption:
 ```yaml

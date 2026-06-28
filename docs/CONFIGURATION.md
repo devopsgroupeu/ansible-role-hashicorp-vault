@@ -191,9 +191,9 @@ or seal secrets run with `no_log: true`.
 | `vault_init_recovery_threshold` | `3` | Recovery key threshold (auto-unseal init). |
 | `vault_init_bootstrap_node` | `"{{ vault_raft_peers[0] }}"` | Inventory hostname of the bootstrap node where init is delegated. **Never hardcode a hostname here.** |
 | `vault_init_pgp_keys` | `[]` | Base64-encoded *binary* PGP public keys (`gpg --export <fp> \| base64`) for encrypting individual unseal/recovery shares. Empty = plaintext shares (protect with `vault_init_encrypt_output`). |
-| `vault_init_output_path` | `"{{ playbook_dir }}/.vault_init_{{ vault_cluster_id }}.json"` | Controller-side path where the init JSON is saved (mode `0600`). Includes `vault_cluster_id` to prevent multi-cluster overwrites. |
+| `vault_init_output_path` | `"{{ '~/.vault' \| expanduser }}/.vault_init_{{ vault_cluster_id }}.json"` | Controller-side path where the init JSON is saved (mode `0600`). Defaults under the controller user's home, outside any playbook/repo directory. The role creates the parent dir (mode `0700`). Includes `vault_cluster_id` to prevent multi-cluster overwrites. |
 | `vault_init_encrypt_output` | `true` | Encrypt the saved init JSON with `ansible-vault encrypt` after writing. Strongly recommended. |
-| `vault_init_encrypt_password_file` | `""` | Path to a password file on the Ansible controller for `ansible-vault encrypt --vault-password-file`. Encryption is skipped (with a warning) when empty, to avoid hanging unattended runs. |
+| `vault_init_encrypt_password_file` | `""` | Path to a password file on the Ansible controller for `ansible-vault encrypt --vault-password-file`. Required when `vault_init_encrypt_output=true`: the role **fails before writing any init material** if encryption is requested without this file, instead of writing the root token and keys in plaintext. Set `vault_init_encrypt_output=false` to intentionally allow plaintext. |
 | `vault_cluster_id` | `"{{ vault_raft_peers[0] }}"` | Stable identifier used in the init output filename. Override to a human-readable name for multi-cluster playbooks. |
 
 ---

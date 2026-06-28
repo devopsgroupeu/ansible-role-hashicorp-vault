@@ -35,8 +35,10 @@ vault_binary_gpg_key_url: "https://www.hashicorp.com/.well-known/pgp-key.txt"
 # air-gapped environments where you have already verified the checksum offline.
 vault_binary_verify_gpg: true
 
-# CPU architecture string used in repo and binary download paths.
-vault_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+# CPU architecture string used in repo and binary download paths. Explicit
+# amd64/arm64 map; any other architecture resolves to "" and is rejected by
+# validate.yml (this role supports amd64 and arm64 only).
+vault_arch: "{{ {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(ansible_architecture, '') }}"
 
 # ==============================================================================
 # Paths / users
@@ -261,9 +263,13 @@ vault_init_bootstrap_node: "{{ vault_raft_peers[0] }}"
 # shares (protect them with vault_init_encrypt_output).
 vault_init_pgp_keys: []
 
-# Controller-side path where the init JSON is saved (mode 0600).
-# Includes cluster_id so multi-cluster playbooks don't overwrite each other.
-vault_init_output_path: "{{ playbook_dir }}/.vault_init_{{ vault_cluster_id }}.json"
+# Controller-side path where the init JSON is saved (mode 0600). Defaults to a
+# directory in the controller user's home (NOT the playbook/repo dir) so init
+# secrets never land inside a consumer's git repository. The role creates the
+# parent directory (mode 0700). Includes cluster_id so multi-cluster playbooks
+# don't overwrite each other. If you do point this inside a repo, add a
+# .gitignore entry for '.vault_init_*' and never commit the file.
+vault_init_output_path: "{{ '~/.vault' | expanduser }}/.vault_init_{{ vault_cluster_id }}.json"
 
 # Encrypt the saved init JSON with 'ansible-vault encrypt' after writing.
 # Strongly recommended when not using PGP keys.
@@ -271,8 +277,10 @@ vault_init_encrypt_output: true
 
 # Path to a password file on the Ansible controller used with
 # 'ansible-vault encrypt --vault-password-file'. Required when
-# vault_init_encrypt_output=true; encryption is skipped (with a warning) when
-# this is empty, avoiding an interactive prompt that hangs unattended runs.
+# vault_init_encrypt_output=true: the role FAILS (before writing any init
+# material) if encryption is requested without this file, rather than writing
+# the root token and unseal/recovery keys in plaintext. To intentionally store
+# the init file unencrypted, set vault_init_encrypt_output: false.
 vault_init_encrypt_password_file: ""
 
 # Stable identifier used in the init output filename. Defaults to the first

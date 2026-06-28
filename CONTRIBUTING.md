@@ -25,6 +25,11 @@ Please avoid:
 
 If unsure, open a GitHub Issue to talk first.
 
+## Code of Conduct
+
+Please review our [Code of Conduct](CODE_OF_CONDUCT.md). We are committed to
+fostering a safe, inclusive environment for everyone.
+
 ## Getting Started
 
 ```bash
@@ -41,11 +46,22 @@ ansible-galaxy collection install -r requirements.yml
 yamllint .
 ansible-lint --profile production
 
-# Run the render scenario (offline, no Vault install)
+# Run the offline test scenario
 molecule test -s render
 ```
 
-## Commit conventions
+If your change is non-trivial, open an issue first so we can discuss the approach.
+
+## Obvious Fix Policy
+
+You do not need to open an issue for:
+
+- Fixing typos or formatting
+- Comment updates
+- Minor README changes
+- `.gitignore` tweaks
+
+## Commit Conventions
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
@@ -59,7 +75,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 Breaking changes: append `!` after the type (e.g. `feat!:`) and add a
 `BREAKING CHANGE:` footer.
 
-## Code standards
+## Code Standards
 
 - FQCN for every module (`ansible.builtin.*`, `community.crypto.*`).
 - `loop:` not `with_*`; `loop_control.label` on every loop.
@@ -69,9 +85,10 @@ Breaking changes: append `!` after the type (e.g. `feat!:`) and add a
 - Bracket access (`result['stdout']`); never dot-notation.
 - `no_log: true` on every task touching secrets, tokens, or keys.
 - `changed_when:` / `failed_when:` on every `command`/`shell` task.
+- Any new variable must have a matching entry in `meta/argument_specs.yml` and a comment in `defaults/main.yml`.
 - `ansible-lint --profile production` and `yamllint .` must both be clean (0 violations).
 
-## Security issues
+## Security Issues
 
 Please do **not** open a public issue for security vulnerabilities.
 Report them privately by email at info@devopsgroup.sk.
