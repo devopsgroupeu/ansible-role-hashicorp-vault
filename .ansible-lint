@@ -1,4 +1,8 @@
 profile: production
+# The examples use the published Galaxy name (hyphenated). ansible-lint only
+# links this checkout as devopsgroupeu.hashicorp_vault, so mock the Galaxy name.
+mock_roles:
+  - devopsgroupeu.hashicorp-vault
 exclude_paths:
   - .github/
   - .ansible-lint
