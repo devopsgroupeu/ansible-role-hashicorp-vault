@@ -3,102 +3,23 @@
 # Install Vault from a GPG-verified binary zip (air-gapped / version-pinned)
 # ==============================================================================
 
-# Build the canonical download filename once so all tasks below stay DRY.
-- name: Set binary download facts
-  ansible.builtin.set_fact:
-    __vault_zip_name: "vault_{{ vault_version }}_linux_{{ vault_arch }}.zip"
-    __vault_tmpdir: "/tmp/vault-install-{{ vault_version }}"
+# --- Prerequisites ------------------------------------------------------------
+# A clean host may lack gpg (signature check) and unzip (unarchive).
+
+- name: Install binary install prerequisites (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: "{{ __vault_binary_deps['Debian'] }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
   tags: install
 
-- name: Create temporary download directory
-  ansible.builtin.file:
-    path: "{{ __vault_tmpdir }}"
-    state: directory
-    mode: "0700"
-  tags: install
-
-# Fetch the three artefacts in sequence; get_url is idempotent (checksum guard).
-- name: Download Vault binary zip
-  ansible.builtin.get_url:
-    url: "{{ vault_binary_base_url }}/{{ vault_version }}/{{ __vault_zip_name }}"
-    dest: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
-    mode: "0600"
-    force: false
-  tags: install
-
-- name: Download Vault SHA256SUMS
-  ansible.builtin.get_url:
-    url: "{{ vault_binary_base_url }}/{{ vault_version }}/vault_{{ vault_version }}_SHA256SUMS"
-    dest: "{{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS"
-    mode: "0600"
-    force: false
-  tags: install
-
-- name: Download Vault SHA256SUMS.sig
-  ansible.builtin.get_url:
-    url: "{{ vault_binary_base_url }}/{{ vault_version }}/vault_{{ vault_version }}_SHA256SUMS.sig"
-    dest: "{{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS.sig"
-    mode: "0600"
-    force: false
-  when: vault_binary_verify_gpg | bool
-  tags: install
-
-- name: Download HashiCorp PGP public key
-  ansible.builtin.get_url:
-    url: "{{ vault_binary_gpg_key_url }}"
-    dest: "{{ __vault_tmpdir }}/hashicorp.pgp"
-    mode: "0600"
-    force: false
-  when: vault_binary_verify_gpg | bool
-  tags: install
-
-- name: Import HashiCorp PGP key into ephemeral keyring
-  ansible.builtin.command: >-
-    gpg --batch --no-default-keyring
-    --keyring {{ __vault_tmpdir }}/hashicorp.gpg
-    --import {{ __vault_tmpdir }}/hashicorp.pgp
-  changed_when: false
-  when: vault_binary_verify_gpg | bool
-  tags: install
-
-- name: Verify SHA256SUMS signature
-  ansible.builtin.command: >-
-    gpg --batch --no-default-keyring
-    --keyring {{ __vault_tmpdir }}/hashicorp.gpg
-    --verify {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS.sig
-    {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
-  changed_when: false
-  when: vault_binary_verify_gpg | bool
-  tags: install
-
-# Verify the zip checksum against the signed SHA256SUMS file.
-# SHA256SUMS lists every platform's zip, but only this architecture's zip was
-# downloaded. We therefore (a) assert the downloaded zip is present so a missing
-# zip fails closed, then (b) run sha256sum with --ignore-missing so the verify
-# checks our present file while skipping the absent other-platform entries.
-- name: Stat downloaded Vault zip before checksum verification
-  ansible.builtin.stat:
-    path: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
-  register: __vault_zip_stat
-  tags: install
-
-- name: Assert downloaded Vault zip exists
-  ansible.builtin.assert:
-    that:
-      - __vault_zip_stat['stat']['exists'] | bool
-    fail_msg: >-
-      Downloaded Vault zip {{ __vault_zip_name }} is missing from
-      {{ __vault_tmpdir }}; cannot verify checksum.
-    quiet: true
-  tags: install
-
-- name: Verify zip checksum matches SHA256SUMS
-  ansible.builtin.command: >-
-    sha256sum --ignore-missing -c
-    {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
-  args:
-    chdir: "{{ __vault_tmpdir }}"
-  changed_when: false
+- name: Install binary install prerequisites (RHEL/EL)
+  ansible.builtin.dnf:
+    name: "{{ __vault_binary_deps['RedHat'] }}"
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
   tags: install
 
 # --- Create vault system group and user (binary path only) --------------------
@@ -121,38 +42,127 @@
     state: present
   tags: install
 
-# --- Extract binary -----------------------------------------------------------
-# Idempotency: check existing binary version before extracting.
+# --- Idempotency: skip everything below when the version is installed --------
 
 - name: Check current installed binary version
   ansible.builtin.command: "{{ vault_bin_path }} version"
   register: __vault_installed_version
+  check_mode: false
   changed_when: false
   failed_when: false
   tags: install
 
-- name: Extract Vault binary to /usr/local/bin
-  ansible.builtin.unarchive:
-    src: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
-    dest: /usr/local/bin
-    remote_src: true
-    include:
-      - vault
-    mode: "0755"
-    owner: root
-    group: root
+- name: Download, verify and install the Vault binary
   when: >-
     __vault_installed_version['rc'] != 0 or
     vault_version not in __vault_installed_version['stdout']
-  notify:
-    - reload systemd daemon
-    - restart vault
   tags: install
+  block:
+    # Build the canonical download filename once so all tasks below stay DRY.
+    - name: Set binary download facts
+      ansible.builtin.set_fact:
+        __vault_zip_name: "vault_{{ vault_version }}_linux_{{ vault_arch }}.zip"
+        __vault_tmpdir: "/tmp/vault-install-{{ vault_version }}"
 
-# --- Clean up temp directory --------------------------------------------------
+    - name: Create temporary download directory
+      ansible.builtin.file:
+        path: "{{ __vault_tmpdir }}"
+        state: directory
+        mode: "0700"
 
-- name: Remove temporary download directory
-  ansible.builtin.file:
-    path: "{{ __vault_tmpdir }}"
-    state: absent
-  tags: install
+    # Fetch the artefacts in sequence; get_url is idempotent (checksum guard).
+    - name: Download Vault binary zip
+      ansible.builtin.get_url:
+        url: "{{ vault_binary_base_url }}/{{ vault_version }}/{{ __vault_zip_name }}"
+        dest: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
+        mode: "0600"
+        force: false
+
+    - name: Download Vault SHA256SUMS
+      ansible.builtin.get_url:
+        url: "{{ vault_binary_base_url }}/{{ vault_version }}/vault_{{ vault_version }}_SHA256SUMS"
+        dest: "{{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS"
+        mode: "0600"
+        force: false
+
+    - name: Download Vault SHA256SUMS.sig
+      ansible.builtin.get_url:
+        url: "{{ vault_binary_base_url }}/{{ vault_version }}/vault_{{ vault_version }}_SHA256SUMS.sig"
+        dest: "{{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS.sig"
+        mode: "0600"
+        force: false
+      when: vault_binary_verify_gpg | bool
+
+    - name: Download HashiCorp PGP public key
+      ansible.builtin.get_url:
+        url: "{{ vault_binary_gpg_key_url }}"
+        dest: "{{ __vault_tmpdir }}/hashicorp.pgp"
+        mode: "0600"
+        force: false
+      when: vault_binary_verify_gpg | bool
+
+    - name: Import HashiCorp PGP key into ephemeral keyring
+      ansible.builtin.command: >-
+        gpg --batch --no-default-keyring
+        --keyring {{ __vault_tmpdir }}/hashicorp.gpg
+        --import {{ __vault_tmpdir }}/hashicorp.pgp
+      changed_when: false
+      when: vault_binary_verify_gpg | bool
+
+    - name: Verify SHA256SUMS signature
+      ansible.builtin.command: >-
+        gpg --batch --no-default-keyring
+        --keyring {{ __vault_tmpdir }}/hashicorp.gpg
+        --verify {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS.sig
+        {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
+      changed_when: false
+      when: vault_binary_verify_gpg | bool
+
+    # Verify the zip checksum against the signed SHA256SUMS file.
+    # SHA256SUMS lists every platform's zip, but only this architecture's zip
+    # was downloaded. We therefore (a) assert the downloaded zip is present so a
+    # missing zip fails closed, then (b) run sha256sum with --ignore-missing so
+    # the verify checks our present file while skipping the absent
+    # other-platform entries.
+    - name: Stat downloaded Vault zip before checksum verification
+      ansible.builtin.stat:
+        path: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
+      register: __vault_zip_stat
+
+    - name: Assert downloaded Vault zip exists
+      ansible.builtin.assert:
+        that:
+          - __vault_zip_stat['stat']['exists'] | bool
+        fail_msg: >-
+          Downloaded Vault zip {{ __vault_zip_name }} is missing from
+          {{ __vault_tmpdir }}; cannot verify checksum.
+        quiet: true
+
+    - name: Verify zip checksum matches SHA256SUMS
+      ansible.builtin.command: >-
+        sha256sum --ignore-missing -c
+        {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
+      args:
+        chdir: "{{ __vault_tmpdir }}"
+      changed_when: false
+
+    - name: Extract Vault binary to /usr/local/bin
+      ansible.builtin.unarchive:
+        src: "{{ __vault_tmpdir }}/{{ __vault_zip_name }}"
+        dest: /usr/local/bin
+        remote_src: true
+        include:
+          - vault
+        mode: "0755"
+        owner: root
+        group: root
+      notify:
+        - reload systemd daemon
+        - restart vault
+
+  always:
+    - name: Remove temporary download directory
+      ansible.builtin.file:
+        path: "{{ __vault_tmpdir }}"
+        state: absent
+      when: __vault_tmpdir is defined

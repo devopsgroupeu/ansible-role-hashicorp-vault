@@ -16,6 +16,20 @@ __vault_pkg_deps:
     - ca-certificates
     - gnupg2
 
+# Packages the binary install method needs on a clean host: gpg verifies
+# SHA256SUMS.sig and unzip extracts the release zip. gpg-agent is listed
+# explicitly: without it 'gpg --import' exits 2 on Ubuntu 24.04.
+__vault_binary_deps:
+  Debian:
+    - ca-certificates
+    - gpg
+    - gpg-agent
+    - unzip
+  RedHat:
+    - ca-certificates
+    - gnupg2
+    - unzip
+
 # Directory into which the role-generated CA is installed for OS trust.
 __vault_ca_trust_dir:
   Debian: "/usr/local/share/ca-certificates"
