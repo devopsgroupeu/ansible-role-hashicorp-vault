@@ -4,7 +4,7 @@
 # ==============================================================================
 
 # Pinned Vault version for reproducible installs.
-vault_version: "2.0.3"
+vault_version: "2.2.2"
 
 # Installation method: 'package' (default, uses HashiCorp repo) or 'binary'
 # (GPG-verified zip download, useful for air-gapped / version-pinned envs).

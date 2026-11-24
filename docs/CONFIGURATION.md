@@ -27,7 +27,7 @@ is prefixed `vault_`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `vault_version` | `"2.0.3"` | Pinned Vault version for reproducible installs. Override to upgrade. |
+| `vault_version` | `"2.2.2"` | Pinned Vault version for reproducible installs. Override to upgrade. |
 | `vault_install_method` | `"package"` | `package` (HashiCorp APT/YUM repo, default) or `binary` (GPG-verified zip). |
 | `vault_package_name` | `"vault"` | APT/YUM package name. Set to `vault-enterprise` for the ENT build. |
 | `vault_apt_repo_url` | `"https://apt.releases.hashicorp.com"` | APT repository base URL. |

@@ -22,7 +22,7 @@ as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 - **Collections:** `community.crypto >= 3.2.2`
   Install via: `ansible-galaxy collection install -r requirements.yml`
 - **Target OS:** Ubuntu 24.04 (noble), Debian 12/13 (bookworm/trixie), RHEL/Rocky/Alma 9
-- **Vault version:** 2.0.3 (default; override via `vault_version`)
+- **Vault version:** 2.2.2 (default; override via `vault_version`)
 - **Docker (Molecule):** required for running tests locally
 - **`become: true` at the play level** — the role does not set `become` per-task
 
@@ -122,7 +122,7 @@ Key variables to be aware of:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `vault_version` | `"2.0.3"` | Pin your desired Vault version |
+| `vault_version` | `"2.2.2"` | Pin your desired Vault version |
 | `vault_install_method` | `"package"` | `package` or `binary` |
 | `vault_tls_enabled` | `true` | **TLS on by default** — supply BYO certs or set `vault_tls_generate_certs: true` |
 | `vault_tls_generate_certs` | `false` | `true` = self-signed cert (dev/test only) |
@@ -221,6 +221,33 @@ handler, so the new version runs right away and the role re-unseals the node in
 the same run. For an HA upgrade, follow the HashiCorp HA upgrade order: run the
 play with `serial: 1`, standby nodes first and the active node last, so only one
 node is down and sealed at a time.
+
+---
+
+## Upgrading Vault
+
+The role pins `vault_version` (default `2.2.2`). When you do not pin it
+yourself, a role upgrade can change the Vault version: the next run installs it,
+restarts Vault and re-unseals it (see [HA restart behaviour](#ha-restart-behaviour)
+for the HA order). Read the HashiCorp changelog for every minor version you
+cross. Notes for 2.0.3 to 2.2.2:
+
+- **2.0.4:** duplicate HCL attributes always fail to parse, and the
+  `VAULT_ALLOW_PENDING_REMOVAL_DUPLICATE_HCL_ATTRIBUTES` escape hatch is gone.
+  The role rejects `vault_extra_config` / `vault_raft_extra_parameters` keys
+  that it already renders.
+- **2.1.2 and 2.2.0:** ACL rule paths for named resources are matched
+  lowercased. Existing mixed-case deny rules **fail open (become allow-all)
+  after the upgrade until they are rewritten with lowercase names.** Audit your
+  policies before upgrading.
+- **2.2.0:** `sys/rekey` and `sys/generate-root` require authentication by
+  default (opt out with `enable_unauthenticated_access`). The role uses
+  neither.
+- **2.2.0:** Raft rejects `performance_multiplier <= 0`. The role default is
+  `1`, and the role validates the range 1 to 10.
+
+The 2.0 line reached end of life on 2026-08-31 and misses ACL security fixes
+from 2.0.4, 2.1.2, 2.2.0, 2.2.1 and 2.2.2.
 
 ---
 

@@ -80,6 +80,27 @@
           '{{ __verify_vault_status['storage_type'] }}' on {{ inventory_hostname }}
         success_msg: "Storage type is raft on {{ inventory_hostname }}"
 
+    - name: Query the Vault binary version
+      ansible.builtin.command: vault version
+      register: __verify_vault_version
+      changed_when: false
+
+    - name: Assert the binary and the running Vault are the role default version
+      ansible.builtin.assert:
+        that:
+          - ('v' ~ __verify_default_version) in __verify_vault_version['stdout']
+          - __verify_vault_status['version'] == __verify_default_version
+        fail_msg: >-
+          Expected Vault {{ __verify_default_version }} (role default) on
+          {{ inventory_hostname }}; binary says
+          '{{ __verify_vault_version['stdout'] }}', status says
+          {{ __verify_vault_status['version'] }}.
+      vars:
+        __verify_default_version: >-
+          {{ (lookup('ansible.builtin.file',
+              lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') ~ '/defaults/main.yml')
+              | from_yaml)['vault_version'] }}
+
 # --- raft peer count + autopilot + ha_mode (run on bootstrap node only) -------
 
 - name: Verify Raft cluster state on bootstrap node

@@ -254,3 +254,18 @@
           - "'Vault' in __verify_vault_version['stdout']"
         fail_msg: "Vault binary not working or missing version output"
         success_msg: "Vault binary is functional"
+
+    - name: Assert the binary and the running Vault are the role default version
+      ansible.builtin.assert:
+        that:
+          - ('v' ~ __verify_default_version) in __verify_vault_version['stdout']
+          - __verify_vault_status['version'] == __verify_default_version
+        fail_msg: >-
+          Expected Vault {{ __verify_default_version }} (role default); binary
+          says '{{ __verify_vault_version['stdout'] }}', status says
+          {{ __verify_vault_status['version'] }}.
+      vars:
+        __verify_default_version: >-
+          {{ (lookup('ansible.builtin.file',
+              lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') ~ '/defaults/main.yml')
+              | from_yaml)['vault_version'] }}

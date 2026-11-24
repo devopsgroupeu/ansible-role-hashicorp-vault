@@ -15,7 +15,7 @@ argument_specs:
       vault_version:
         type: str
         required: false
-        default: "2.0.3"
+        default: "2.2.2"
         description: Pinned Vault version for reproducible installs.
 
       vault_install_method:
