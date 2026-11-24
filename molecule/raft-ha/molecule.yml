@@ -7,12 +7,9 @@
 # starts. Using a shared network is the only reliable way to make retry_join
 # hostname resolution work between containers.
 #
-# Idempotence step is intentionally omitted from test_sequence: a live 3-node
-# Raft cluster that already exists cannot be cleanly re-converged in a single
-# Molecule run (Vault rejects a second init, and the unseal loop is guarded by
-# status probes, but the raft formation verify 'until' may time out on a
-# second pass when autopilot has already promoted peers). The scenario is
-# validated via syntax check + converge + verify. Run manually with:
+# The test sequence runs converge, idempotence (a second full run must report
+# changed=0 on all nodes), a --limit vault2 re-run (side_effect_limit.yml, must
+# not rewrite retry_join or SANs) and verify. Run manually with:
 #   molecule test -s raft-ha
 # or via GitHub Actions workflow_dispatch (see .github/workflows/ci.yml).
 
@@ -64,6 +61,8 @@ platforms:
 
 provisioner:
   name: ansible
+  playbooks:
+    side_effect: side_effect_limit.yml
   env:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
   config_options:
@@ -83,7 +82,6 @@ verifier:
   name: ansible
 
 scenario:
-  # Idempotence is omitted — see header comment above.
   test_sequence:
     - dependency
     - cleanup
@@ -92,6 +90,8 @@ scenario:
     - create
     - prepare
     - converge
+    - idempotence
+    - side_effect side_effect_limit.yml
     - verify
     - cleanup
     - destroy

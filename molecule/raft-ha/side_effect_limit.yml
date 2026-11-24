@@ -1,0 +1,65 @@
+---
+# Side effect: re-run converge.yml with --limit vault2 on the formed cluster.
+# vault1 and vault3 have no facts in that run; the role must gather them so
+# retry_join and the certificate SANs stay the same. Expect no changes and an
+# unchanged vault.hcl on vault2.
+
+- name: Record vault.hcl checksum before the limited run
+  hosts: vault2
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stat vault.hcl
+      ansible.builtin.stat:
+        path: /etc/vault.d/vault.hcl
+        checksum_algorithm: sha256
+      register: __limit_hcl_before
+
+- name: Run converge.yml limited to vault2
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml with --limit vault2
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+          - --limit
+          - vault2
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __limit_run
+      changed_when: false
+      failed_when: false
+
+    - name: Show the limited run play recap
+      ansible.builtin.debug:
+        msg: "{{ __limit_run['stdout_lines'] | select('search', 'ok=') | list }}"
+
+    - name: Assert the limited run changed nothing
+      ansible.builtin.assert:
+        that:
+          - __limit_run['rc'] == 0
+          - __limit_run['stdout'] is not search('changed=[1-9]')
+          - __limit_run['stdout'] is not search('failed=[1-9]')
+        fail_msg: "Limited run failed or changed something: {{ __limit_run['stdout_lines'][-15:] }}"
+
+- name: Compare vault.hcl checksum after the limited run
+  hosts: vault2
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stat vault.hcl
+      ansible.builtin.stat:
+        path: /etc/vault.d/vault.hcl
+        checksum_algorithm: sha256
+      register: __limit_hcl_after
+
+    - name: Assert vault.hcl is unchanged
+      ansible.builtin.assert:
+        that:
+          - __limit_hcl_after['stat']['checksum'] == __limit_hcl_before['stat']['checksum']
+        fail_msg: "vault.hcl on vault2 changed during the --limit vault2 run"

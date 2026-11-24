@@ -210,6 +210,10 @@ cluster-wide config change causes a simultaneous reseal and a brief outage; the
 role re-unseals the nodes later in the same run (using the saved init file). For
 zero-downtime changes in production, serialize the run one node at a time (e.g.
 `serial: 1` on the play, or `--limit` per node) so only one node reseals at a time.
+The role gathers network facts for peers outside the current batch, so
+`retry_join` addresses and certificate SANs stay stable in such runs. Use
+`serial`/`--limit` only for day-2 changes on an existing cluster, never for the
+first bootstrap: the cluster has to be initialized and joined in one full run.
 
 ---
 

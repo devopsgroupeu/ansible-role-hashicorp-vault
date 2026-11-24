@@ -3,6 +3,24 @@
 # Config: dirs, perms, vault.env, vault.hcl, vault.service, swap, selinux
 # ==============================================================================
 
+# In --limit / serial runs, peers outside the batch have no facts. Without them
+# the retry_join addresses below and the certificate SANs in tls_generate.yml
+# would fall back to hostnames and drop IP SANs, rewriting vault.hcl and
+# restarting Vault. Gather network facts for every inventory peer that lacks
+# them. Peers that are not in the inventory keep the hostname fallback.
+- name: Gather network facts for peers missing them
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  run_once: true
+  loop: "{{ vault_raft_peers | select('in', groups['all']) | list }}"
+  when:
+    - not vault_config_only | bool
+    - "'default_ipv4' not in (hostvars[item]['ansible_facts'] | default({}))"
+  tags: config
+
 # Build __vault_retry_join_peers: list of {addr: <ip|hostname>} for every peer
 # except the current host. Falls back to the peer inventory name when
 # ansible_default_ipv4.address is not yet gathered (e.g. render-only mode).
