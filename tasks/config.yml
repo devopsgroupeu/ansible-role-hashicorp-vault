@@ -148,8 +148,12 @@
   ansible.builtin.replace:
     path: /etc/fstab
     # Match any uncommented line whose third whitespace-delimited field is 'swap'.
-    # Covers both Debian (sw options) and RHEL (defaults options) fstab swap entries.
-    regexp: '^([^#\S]*\S+\s+\S+\s+swap\s+\S+\s+.*)$'
+    # Covers both Debian (sw options) and RHEL (defaults options) fstab swap
+    # entries. The first field must not start with '#', so already commented
+    # lines are left alone, and only [ \t] separates fields: \s would also
+    # match newlines (the module uses re.MULTILINE) and join a blank line to
+    # the next entry.
+    regexp: '^([ \t]*[^#\s]\S*[ \t]+\S+[ \t]+swap[ \t]+.*)$'
     replace: '# \1'
     backup: true
   when:

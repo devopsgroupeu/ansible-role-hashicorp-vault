@@ -38,6 +38,32 @@
         fail_msg: "/etc/vault.d/vault.hcl not found"
         success_msg: "/etc/vault.d/vault.hcl exists"
 
+    # --- fstab swap entries --------------------------------------------------
+    # Active entries are commented once; already commented lines are untouched
+    # (idempotence covers the second run).
+
+    - name: Slurp /etc/fstab
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: __verify_fstab
+
+    - name: Assert only the active swap entries were commented out
+      ansible.builtin.assert:
+        that:
+          - (__verify_fstab['content'] | b64decode) == __verify_fstab_expected
+        fail_msg: "Unexpected /etc/fstab: {{ __verify_fstab['content'] | b64decode }}"
+      vars:
+        __verify_fstab_expected: |
+          # fstab written by molecule prepare
+          UUID=0a1b / ext4 defaults 0 1
+
+          # /swapfile none swap sw 0 0
+          # UUID=abc swap swap defaults 0 0
+          # /swap4 none swap sw
+          #/swapfile2 none swap sw 0 0
+          #UUID=def swap swap defaults 0 0
+            # /swap3 none swap sw 0 0
+
     # --- Vault status: initialized + unsealed + raft --------------------------
 
     - name: Wait for Vault TLS listener to become ready
