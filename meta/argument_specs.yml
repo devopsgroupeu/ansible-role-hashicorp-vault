@@ -671,6 +671,27 @@ argument_specs:
         default: {}
         description: Extra options passed to 'vault audit enable' as key=value pairs.
 
+      vault_audit_logrotate_enabled:
+        type: bool
+        required: false
+        default: true
+        description: >
+          Rotate the audit log with logrotate (installs logrotate and renders
+          /etc/logrotate.d/vault-audit, which reloads Vault after rotation).
+
+      vault_audit_logrotate_rotate:
+        type: int
+        required: false
+        default: 14
+        description: Number of rotated audit logs to keep.
+
+      vault_audit_logrotate_frequency:
+        type: str
+        required: false
+        default: "daily"
+        choices: [daily, weekly, monthly, yearly]
+        description: logrotate frequency for the audit log.
+
       # ---- systemd / permissions ----
       vault_systemd_limit_nofile:
         type: int

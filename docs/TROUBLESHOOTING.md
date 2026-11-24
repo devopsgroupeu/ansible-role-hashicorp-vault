@@ -15,6 +15,7 @@ Common issues and resolutions for the `devopsgroupeu.hashicorp-vault` role.
 - [Raft join failures](#raft-join-failures)
 - [Package vs binary path issues](#package-vs-binary-path-issues)
 - [Init output written unencrypted / encryption skipped](#init-output-written-unencrypted--encryption-skipped)
+- [Requests fail: audit device cannot write](#requests-fail-audit-device-cannot-write)
 - [Useful commands](#useful-commands)
 
 ---
@@ -312,6 +313,27 @@ encrypts it.
 
 Regardless of the encryption setting, **never commit the init file** — it contains
 unseal keys (Shamir) or recovery keys plus the initial root token.
+
+---
+
+## Requests fail: audit device cannot write
+
+**Symptom:** Vault answers requests with errors (HTTP 500, "permission denied"
+or "failed to log request"), while `vault status` still reports the node as
+unsealed.
+
+**Cause:** when audit devices are enabled and none of them can write the
+request (for example the disk under `vault_audit_dir` is full, or the audit log
+was moved away without a reload), Vault refuses to service the request rather
+than skip the audit entry. The role enables a single file audit device, so that
+device is the only one.
+
+**Fix:** free space under `vault_audit_dir` and keep
+`vault_audit_logrotate_enabled: true` (the default) so
+`/etc/logrotate.d/vault-audit` rotates and compresses the log and reloads Vault
+(SIGHUP) to reopen it. When rotating by hand, always run
+`systemctl reload vault` afterwards. Check the setup with
+`logrotate -d /etc/logrotate.d/vault-audit`.
 
 ---
 

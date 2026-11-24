@@ -379,6 +379,17 @@ vault_audit_file_path: "{{ vault_audit_dir }}/vault_audit.log"
 # Extra options passed to 'vault audit enable' as key=value pairs (dict).
 vault_audit_options: {}
 
+# Rotate the audit log with logrotate (installs the package and renders
+# /etc/logrotate.d/vault-audit). The file audit device does not rotate its own
+# log, and Vault refuses audited requests when no audit device can write.
+vault_audit_logrotate_enabled: true
+
+# Number of rotated audit logs to keep.
+vault_audit_logrotate_rotate: 14
+
+# logrotate frequency for the audit log: daily, weekly, monthly or yearly.
+vault_audit_logrotate_frequency: "daily"
+
 # ==============================================================================
 # systemd / permissions
 # ==============================================================================

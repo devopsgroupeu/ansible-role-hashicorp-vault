@@ -21,6 +21,29 @@
   tags: audit
 
 # ------------------------------------------------------------------------------
+# 1a. Rotate the audit log. The file device never rotates its own log, and when
+#     no audit device can write (e.g. a full disk) Vault refuses every audited
+#     request. Runs on every node: each node writes its own audit log.
+# ------------------------------------------------------------------------------
+
+- name: Install logrotate for the audit log
+  ansible.builtin.package:
+    name: logrotate
+    state: present
+  when: vault_audit_logrotate_enabled | bool
+  tags: audit
+
+- name: Render logrotate config for the audit log
+  ansible.builtin.template:
+    src: vault-audit.logrotate.j2
+    dest: /etc/logrotate.d/vault-audit
+    owner: root
+    group: root
+    mode: "0644"
+  when: vault_audit_logrotate_enabled | bool
+  tags: audit
+
+# ------------------------------------------------------------------------------
 # 2. Check which audit devices are already enabled.
 #    Audit-device configuration is cluster-wide (stored in Raft), so the list
 #    and the enable below run ONCE on the active/bootstrap node. Standby

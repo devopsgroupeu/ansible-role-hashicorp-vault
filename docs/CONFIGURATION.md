@@ -231,6 +231,9 @@ token from the init output (`vault_init_output_path`).
 | `vault_audit_path` | `"file/"` | Vault audit device mount path (used with `vault audit enable -path=…`). |
 | `vault_audit_file_path` | `"{{ vault_audit_dir }}/vault_audit.log"` | Audit log file path on the target host. |
 | `vault_audit_options` | `{}` | Extra options passed to `vault audit enable` as `key=value` pairs. |
+| `vault_audit_logrotate_enabled` | `true` | Rotate the audit log with logrotate: installs `logrotate` and renders `/etc/logrotate.d/vault-audit` (`compress`, `delaycompress`, `missingok`, `notifempty`, `create 0600 vault vault`), whose `postrotate` runs `systemctl reload vault.service` so Vault reopens the file. The file device does not rotate its own log. |
+| `vault_audit_logrotate_rotate` | `14` | Number of rotated audit logs to keep. |
+| `vault_audit_logrotate_frequency` | `"daily"` | logrotate frequency. Choices: `daily`, `weekly`, `monthly`, `yearly`. |
 
 ---
 
