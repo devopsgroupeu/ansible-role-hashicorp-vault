@@ -369,7 +369,8 @@
       - vault-node-3
     vault_tls_enabled: false
     vault_tls_generate_certs: false
-    vault_api_addr: "http://127.0.0.1:8200"
+    # vault_api_addr is left at its default so the http scheme derivation from
+    # vault_tls_enabled is tested too.
     vault_cluster_addr: "https://127.0.0.1:8201"
   tasks:
     - name: Include role for TLS-disabled variant
@@ -400,3 +401,24 @@
         that: "'tls_cert_file' not in vault_hcl_notls"
         fail_msg: >-
           vault.hcl contains tls_cert_file even though vault_tls_enabled=false.
+
+    - name: Assert retry_join and api_addr use http when TLS disabled
+      ansible.builtin.assert:
+        that:
+          - "'leader_api_addr         = \"http://' in vault_hcl_notls"
+          - "'api_addr     = \"http://' in vault_hcl_notls"
+          - "'leader_api_addr         = \"https://' not in vault_hcl_notls"
+        fail_msg: >-
+          vault.hcl does not use http:// for retry_join leader_api_addr and
+          api_addr even though vault_tls_enabled=false.
+
+    - name: Assert no leader TLS keys in retry_join when TLS disabled
+      ansible.builtin.assert:
+        that:
+          - "'leader_ca_cert_file' not in vault_hcl_notls"
+          - "'leader_client_cert_file' not in vault_hcl_notls"
+          - "'leader_client_key_file' not in vault_hcl_notls"
+          - "'leader_tls_servername' not in vault_hcl_notls"
+        fail_msg: >-
+          vault.hcl renders leader_* TLS keys in retry_join even though
+          vault_tls_enabled=false.

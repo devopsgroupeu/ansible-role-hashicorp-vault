@@ -25,6 +25,18 @@
          | default(hostvars[vault_init_bootstrap_node]['vault_api_addr'] | default(vault_api_addr)) }}
   tags: init_unseal
 
+# One CLI environment for this node and one for tasks delegated to the
+# bootstrap node. VAULT_CACERT is only set when TLS is on: with
+# vault_tls_enabled false the CA file does not exist and the CLI would fail
+# loading it.
+- name: Build the Vault CLI environment
+  ansible.builtin.set_fact:
+    __vault_cli_env: "{{ {'VAULT_ADDR': vault_api_addr} | combine(__vault_cli_tls_env) }}"
+    __vault_bootstrap_cli_env: "{{ {'VAULT_ADDR': __vault_bootstrap_api_addr} | combine(__vault_cli_tls_env) }}"
+  vars:
+    __vault_cli_tls_env: "{{ {'VAULT_CACERT': vault_tls_ca_file} if vault_tls_enabled | bool else {} }}"
+  tags: init_unseal
+
 # ------------------------------------------------------------------------------
 # 1. Status probe — run on every node
 #    Vault 2.x exit codes: 0 = unsealed, 1 = error/unreachable, 2 = sealed.
@@ -39,9 +51,7 @@
 - name: Probe Vault status on every node
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_status_cmd
   check_mode: false
   changed_when: false
@@ -68,9 +78,7 @@
 - name: Probe Vault status on bootstrap node
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_bootstrap_cli_env }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_bootstrap_status_cmd
@@ -169,9 +177,7 @@
         -key-shares={{ vault_init_key_shares }}
         -key-threshold={{ vault_init_key_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
         -pgp-keys={{ __vault_pgp_key_files['results'] | map(attribute='dest') | join(',') }}{%- endif %}
-      environment:
-        VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
-        VAULT_CACERT: "{{ vault_tls_ca_file }}"
+      environment: "{{ __vault_bootstrap_cli_env }}"
       delegate_to: "{{ vault_init_bootstrap_node }}"
       run_once: true
       register: __vault_init_shamir_result
@@ -186,9 +192,7 @@
         -recovery-shares={{ vault_init_recovery_shares }}
         -recovery-threshold={{ vault_init_recovery_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
         -recovery-pgp-keys={{ __vault_pgp_key_files['results'] | map(attribute='dest') | join(',') }}{%- endif %}
-      environment:
-        VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
-        VAULT_CACERT: "{{ vault_tls_ca_file }}"
+      environment: "{{ __vault_bootstrap_cli_env }}"
       delegate_to: "{{ vault_init_bootstrap_node }}"
       run_once: true
       register: __vault_init_autounseal_result
@@ -356,9 +360,7 @@
 - name: Re-probe Vault status on every node after init
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_status_post_init_cmd
   check_mode: false
   changed_when: false
@@ -523,7 +525,7 @@
     body:
       key: "{{ item }}"
     validate_certs: true
-    ca_path: "{{ vault_tls_ca_file }}"
+    ca_path: "{{ vault_tls_ca_file if vault_tls_enabled | bool else omit }}"
     status_code:
       - 200
   no_log: true
@@ -546,9 +548,7 @@
 - name: Wait for leader to report unsealed status (Shamir)
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_leader_unseal_probe
   changed_when: false
   # failed_when mirrors until: when failed_when is set it overrides the failure
@@ -582,9 +582,7 @@
 - name: Wait for follower to become initialized via Raft join
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_follower_init_probe
   changed_when: false
   # failed_when mirrors until (see the leader wait). An initialized follower is
@@ -626,7 +624,7 @@
     body:
       key: "{{ item }}"
     validate_certs: true
-    ca_path: "{{ vault_tls_ca_file }}"
+    ca_path: "{{ vault_tls_ca_file if vault_tls_enabled | bool else omit }}"
     status_code:
       - 200
   no_log: true
@@ -653,9 +651,7 @@
 - name: Wait for Vault to report unsealed status
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_post_unseal_cmd
   changed_when: false
   # failed_when mirrors until (see the leader wait).
@@ -722,10 +718,7 @@
 - name: Look up the token on the bootstrap node
   ansible.builtin.command: >-
     {{ vault_bin_path }} token lookup -format=json
-  environment:
-    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_api_token }}"
+  environment: "{{ __vault_bootstrap_cli_env | combine({'VAULT_TOKEN': __vault_api_token}) }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_token_lookup
@@ -775,10 +768,7 @@
 - name: Verify Raft peer formation (bootstrap node)
   ansible.builtin.command: >-
     {{ vault_bin_path }} operator raft list-peers -format=json
-  environment:
-    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_api_token }}"
+  environment: "{{ __vault_bootstrap_cli_env | combine({'VAULT_TOKEN': __vault_api_token}) }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_raft_peers_cmd

@@ -142,14 +142,18 @@ argument_specs:
       vault_api_addr:
         type: str
         required: false
-        default: "https://{{ ansible_facts['default_ipv4']['address'] }}:8200"
-        description: Advertised API address (https; used by clients and retry_join).
+        default: "{{ 'https' if vault_tls_enabled | bool else 'http' }}://{{ ansible_facts['default_ipv4']['address'] }}:8200"
+        description: >
+          Advertised API address (used by clients and retry_join). The scheme
+          follows vault_tls_enabled (https when on, http when off).
 
       vault_cluster_addr:
         type: str
         required: false
         default: "https://{{ ansible_facts['default_ipv4']['address'] }}:8201"
-        description: Advertised cluster address (https; used for Raft replication).
+        description: >
+          Advertised cluster address (https; used for Raft replication). The
+          cluster port always uses TLS, even when vault_tls_enabled is false.
 
       vault_ui:
         type: bool
@@ -267,7 +271,9 @@ argument_specs:
         type: bool
         required: false
         default: true
-        description: Install the role-generated CA into the OS trust store.
+        description: >
+          Install the CA (vault_tls_ca_file) into the OS trust store. Ignored
+          when vault_tls_enabled is false.
 
       # ---- Storage (Raft) ----
       vault_storage:

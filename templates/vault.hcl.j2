@@ -30,11 +30,13 @@ storage "raft" {
 {% for peer in __vault_retry_join_peers %}
 
   retry_join {
-    leader_api_addr         = "https://{{ peer['addr'] }}:{{ _api_port }}"
+    leader_api_addr         = "{{ 'https' if vault_tls_enabled | bool else 'http' }}://{{ peer['addr'] }}:{{ _api_port }}"
+{% if vault_tls_enabled | bool %}
     leader_tls_servername   = "{{ vault_tls_leader_servername }}"
     leader_ca_cert_file     = "{{ vault_tls_ca_file }}"
     leader_client_cert_file = "{{ vault_tls_cert_file }}"
     leader_client_key_file  = "{{ vault_tls_key_file }}"
+{% endif %}
   }
 {% endfor %}
 }

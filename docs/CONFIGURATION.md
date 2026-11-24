@@ -61,8 +61,8 @@ is prefixed `vault_`.
 |---|---|---|
 | `vault_listen_address` | `"0.0.0.0:8200"` | API listener bind address and port. |
 | `vault_cluster_listen_address` | `"0.0.0.0:8201"` | Raft cluster listener bind address and port (Vault-internal mTLS). |
-| `vault_api_addr` | `"https://{{ ansible_facts['default_ipv4']['address'] }}:8200"` | Advertised API address. Must use `https://` scheme; override per-node via `host_vars` in multi-node deployments. |
-| `vault_cluster_addr` | `"https://{{ ansible_facts['default_ipv4']['address'] }}:8201"` | Advertised cluster address for Raft replication. Must use `https://` scheme. |
+| `vault_api_addr` | `"{{ 'https' if vault_tls_enabled \| bool else 'http' }}://{{ ansible_facts['default_ipv4']['address'] }}:8200"` | Advertised API address. The scheme follows `vault_tls_enabled` (`https://` when on, `http://` when off); override per-node via `host_vars` in multi-node deployments. |
+| `vault_cluster_addr` | `"https://{{ ansible_facts['default_ipv4']['address'] }}:8201"` | Advertised cluster address for Raft replication. Always `https://`: the cluster port uses TLS even when `vault_tls_enabled` is false. |
 | `vault_ui` | `true` | Enable the Vault web UI. |
 | `vault_cluster_name` | `""` | Human-readable cluster label in `vault.hcl`. Empty = omit (Vault auto-generates). |
 
@@ -82,7 +82,7 @@ TLS is **on by default** (`vault_tls_enabled: true`). Two modes:
 
 | Variable | Default | Description |
 |---|---|---|
-| `vault_tls_enabled` | `true` | Enable TLS on the API listener. **Never disable in production.** |
+| `vault_tls_enabled` | `true` | Enable TLS on the API listener. **Never disable in production.** When `false`, the API and `retry_join` use `http://`, the `leader_*` TLS keys are not rendered, the CLI runs without `VAULT_CACERT` and the CA is not installed into the trust store. |
 | `vault_tls_cert_file` | `"{{ vault_tls_dir }}/vault-cert.pem"` | Server certificate file path (full chain PEM). |
 | `vault_tls_key_file` | `"{{ vault_tls_dir }}/vault-key.pem"` | Server private key file path. |
 | `vault_tls_ca_file` | `"{{ vault_tls_dir }}/vault-ca.pem"` | CA certificate file path (used by clients and `retry_join`). |
@@ -97,7 +97,7 @@ TLS is **on by default** (`vault_tls_enabled: true`). Two modes:
 | `vault_tls_cert_validity` | `"+825d"` | Certificate validity period (`ownca not_after` format). Note: 825 days is a hard limit only on Apple platforms; other platforms accept longer periods. |
 | `vault_tls_leader_servername` | `"vault.cluster.internal"` | Shared DNS SAN that must appear on every node's cert and must match `leader_tls_servername` in `retry_join` blocks. Does not need to resolve in DNS. |
 | `vault_tls_extra_sans` | `[]` | Additional `DNS:` or `IP:` SANs for role-generated certificates. Example: `["DNS:vault.example.com", "IP:10.0.0.1"]`. |
-| `vault_tls_install_ca_to_trust_store` | `true` | Install the role-generated CA into the OS trust store (APT: `/usr/local/share/ca-certificates/`; RHEL: `/etc/pki/ca-trust/source/anchors/`). |
+| `vault_tls_install_ca_to_trust_store` | `true` | Install the CA (`vault_tls_ca_file`) into the OS trust store (APT: `/usr/local/share/ca-certificates/`; RHEL: `/etc/pki/ca-trust/source/anchors/`). Ignored when `vault_tls_enabled` is false. |
 
 ---
 

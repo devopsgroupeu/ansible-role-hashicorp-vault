@@ -1,0 +1,69 @@
+---
+# Verify the tls-disabled scenario: Vault answers over http, is initialized and
+# unsealed, the audit device is enabled and no CA went into the trust store.
+
+- name: Verify Vault over http
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    __verify_init_output_path: "/tmp/.vault_init_molecule_tls_disabled.json"
+  tasks:
+    - name: Slurp vault.hcl
+      ansible.builtin.slurp:
+        src: /etc/vault.d/vault.hcl
+      register: __verify_hcl_raw
+
+    - name: Assert vault.hcl disables TLS and advertises http
+      ansible.builtin.assert:
+        that:
+          - "'tls_disable = true' in (__verify_hcl_raw['content'] | b64decode)"
+          - "'api_addr     = \"http://' in (__verify_hcl_raw['content'] | b64decode)"
+
+    - name: Query Vault status over http without a CA
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+      register: __verify_status_cmd
+      changed_when: false
+      failed_when: __verify_status_cmd['rc'] != 0
+
+    - name: Assert Vault is initialized and unsealed
+      ansible.builtin.assert:
+        that:
+          - (__verify_status_cmd['stdout'] | from_json)['initialized'] | bool
+          - not ((__verify_status_cmd['stdout'] | from_json)['sealed'] | bool)
+
+    - name: Read root token from controller init file
+      ansible.builtin.slurp:
+        src: "{{ __verify_init_output_path }}"
+      delegate_to: localhost
+      become: false
+      register: __verify_init_file_raw
+      no_log: true
+
+    - name: List audit devices over http
+      ansible.builtin.command: vault audit list -format=json
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+        VAULT_TOKEN: "{{ (__verify_init_file_raw['content'] | b64decode | from_json)['root_token'] }}"
+      register: __verify_audit_cmd
+      changed_when: false
+      no_log: true
+
+    - name: Assert the file audit device is enabled
+      ansible.builtin.assert:
+        that:
+          - "'file/' in (__verify_audit_cmd['stdout'] | from_json)"
+        fail_msg: "file/ audit device is not enabled"
+
+    - name: Stat the CA in the OS trust store
+      ansible.builtin.stat:
+        path: /usr/local/share/ca-certificates/vault-ca.crt
+      register: __verify_trust_ca
+
+    - name: Assert no CA was installed into the trust store
+      ansible.builtin.assert:
+        that:
+          - not __verify_trust_ca['stat']['exists']
+        fail_msg: "A CA was copied into the trust store although TLS is off"

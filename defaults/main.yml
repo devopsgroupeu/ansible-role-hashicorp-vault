@@ -76,10 +76,12 @@ vault_listen_address: "0.0.0.0:8200"
 # Raft cluster listener bind address and port.
 vault_cluster_listen_address: "0.0.0.0:8201"
 
-# Advertised API address (https scheme; used by clients and retry_join).
-vault_api_addr: "https://{{ ansible_facts['default_ipv4']['address'] }}:8200"
+# Advertised API address (used by clients and retry_join). The scheme follows
+# vault_tls_enabled: https when TLS is on, http when it is off.
+vault_api_addr: "{{ 'https' if vault_tls_enabled | bool else 'http' }}://{{ ansible_facts['default_ipv4']['address'] }}:8200"
 
-# Advertised cluster address (https scheme; used for Raft replication).
+# Advertised cluster address (https scheme; used for Raft replication). The
+# cluster port always uses TLS, even when vault_tls_enabled is false.
 vault_cluster_addr: "https://{{ ansible_facts['default_ipv4']['address'] }}:8201"
 
 # Enable the Vault web UI.
@@ -146,7 +148,8 @@ vault_tls_leader_servername: "vault.cluster.internal"
 # Additional DNS: or IP: SANs to include in role-generated certificates.
 vault_tls_extra_sans: []
 
-# Install the role-generated CA into the OS trust store.
+# Install the CA (vault_tls_ca_file) into the OS trust store. Ignored when
+# vault_tls_enabled is false.
 vault_tls_install_ca_to_trust_store: true
 
 # ==============================================================================

@@ -91,6 +91,9 @@ jobs:
           # negative scenario - failure paths and fail-closed guards
           - scenario: negative
             distro: debian12
+          # tls-disabled scenario - init, unseal and audit over http
+          - scenario: tls-disabled
+            distro: debian12
     steps:
       - name: Checkout
         uses: actions/checkout@v7
