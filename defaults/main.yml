@@ -259,8 +259,12 @@ vault_init_recovery_threshold: 3
 vault_init_bootstrap_node: "{{ vault_raft_peers[0] }}"
 
 # Optional list of base64-encoded *binary* PGP public keys (gpg --export <fp>
-# | base64) for encrypting individual unseal/recovery shares. Empty = plaintext
-# shares (protect them with vault_init_encrypt_output).
+# | base64 -w0) for encrypting individual unseal/recovery shares, one key per
+# share (the count must equal vault_init_key_shares, or
+# vault_init_recovery_shares for auto-unseal). The role writes each key to a
+# temporary file on the bootstrap node for -pgp-keys / -recovery-pgp-keys. With
+# Shamir the role cannot use encrypted shares, so vault_unseal must be false.
+# Empty = plaintext shares (protect them with vault_init_encrypt_output).
 vault_init_pgp_keys: []
 
 # Controller-side path where the init JSON is saved (mode 0600). Defaults to a

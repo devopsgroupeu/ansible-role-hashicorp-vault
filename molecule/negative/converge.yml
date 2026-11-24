@@ -364,3 +364,115 @@
       ansible.builtin.assert:
         that:
           - not ((__case_status['stdout'] | from_json)['sealed'] | bool)
+
+# ------------------------------------------------------------------------------
+# Case 7 (V-07): the number of PGP keys must match the number of key shares.
+# ------------------------------------------------------------------------------
+- name: Case 7 - PGP key count mismatch fails in validate
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: false
+    vault_init_pgp_keys:
+      - "bm90LWEta2V5"
+      - "bm90LWEta2V5"
+  tasks:
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although 2 PGP keys were given for 3 shares"
+      rescue:
+        - name: Assert the PGP key count check fired
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Validate vault_init_pgp_keys matches the number of key shares'
+            fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
+
+# ------------------------------------------------------------------------------
+# Case 8 (V-07 positive): init with a throwaway PGP key. The share in the init
+# file is PGP-encrypted; decrypting it with the test key unseals Vault.
+# ------------------------------------------------------------------------------
+- name: Case 8 - init with PGP keys and unseal with the decrypted share
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: false
+    vault_init_key_shares: 1
+    vault_init_key_threshold: 1
+  tasks:
+    - name: Reset to a fresh Vault
+      ansible.builtin.include_tasks: tasks/reset_vault.yml
+
+    - name: Install gnupg
+      ansible.builtin.apt:
+        name: gnupg
+        state: present
+
+    - name: Generate a throwaway PGP key
+      ansible.builtin.command: >-
+        gpg --batch --pinentry-mode loopback --passphrase ''
+        --quick-gen-key 'molecule-negative <molecule@example.invalid>' default default never
+      args:
+        creates: /root/.gnupg/pubring.kbx
+
+    - name: Export the public key as base64
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        gpg --export molecule@example.invalid | base64 -w0
+      args:
+        executable: /bin/bash
+      register: __case_pgp_pub
+      changed_when: false
+
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+      vars:
+        vault_init_pgp_keys:
+          - "{{ __case_pgp_pub['stdout'] }}"
+
+    - name: Read the init file
+      ansible.builtin.slurp:
+        src: /tmp/.vault_init_molecule_negative.json
+      delegate_to: localhost
+      become: false
+      register: __case_init_raw
+      no_log: true
+
+    - name: Decrypt the unseal share with the test key
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        printf '%s' "$SHARE" | base64 -d | gpg --batch -dq > /root/share.bin &&
+        python3 -c "import base64;d=open('/root/share.bin','rb').read().strip();
+        print(d.decode() if d and all(c in b'0123456789abcdef' for c in d) else base64.b64encode(d).decode())"
+      args:
+        executable: /bin/bash
+      environment:
+        SHARE: "{{ (__case_init_raw['content'] | b64decode | from_json)['unseal_keys_b64'][0] }}"
+      register: __case_share
+      changed_when: false
+      no_log: true
+
+    - name: Unseal Vault with the decrypted share
+      ansible.builtin.command: vault operator unseal -format=json {{ __case_share['stdout'] }}
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_unseal
+      changed_when: true
+      no_log: true
+
+    - name: Assert Vault is unsealed
+      ansible.builtin.assert:
+        that:
+          - not ((__case_unseal['stdout'] | from_json)['sealed'] | bool)
+        fail_msg: "Vault is still sealed after unsealing with the decrypted PGP share"

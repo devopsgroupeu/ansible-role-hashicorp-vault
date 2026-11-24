@@ -490,8 +490,12 @@ argument_specs:
         required: false
         default: []
         description: >
-          Base64-encoded binary PGP public keys for encrypting unseal shares.
-          Empty = plaintext shares (protect with vault_init_encrypt_output).
+          Base64-encoded binary PGP public keys for encrypting unseal or
+          recovery shares, one per share (count must equal
+          vault_init_key_shares, or vault_init_recovery_shares for
+          auto-unseal). With Shamir, vault_unseal must be false because the
+          role cannot use encrypted shares. Empty = plaintext shares (protect
+          with vault_init_encrypt_output).
 
       vault_init_output_path:
         type: str

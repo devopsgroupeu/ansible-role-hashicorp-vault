@@ -126,6 +126,38 @@
     quiet: true
   tags: always
 
+- name: Validate vault_init_pgp_keys matches the number of key shares
+  when:
+    - vault_init | bool
+    - vault_init_pgp_keys | length > 0
+  ansible.builtin.assert:
+    that:
+      - >-
+        vault_init_pgp_keys | length ==
+        ((vault_init_key_shares if vault_seal_type == 'shamir' else vault_init_recovery_shares) | int)
+    fail_msg: >-
+      vault_init_pgp_keys has {{ vault_init_pgp_keys | length }} key(s) but
+      {{ 'vault_init_key_shares' if vault_seal_type == 'shamir' else 'vault_init_recovery_shares' }}
+      is {{ vault_init_key_shares if vault_seal_type == 'shamir' else vault_init_recovery_shares }}.
+      Vault encrypts one share per PGP key, so the counts must match.
+    quiet: true
+  tags: always
+
+- name: Validate PGP-encrypted Shamir shares are not used for unseal
+  when:
+    - vault_init | bool
+    - vault_init_pgp_keys | length > 0
+    - vault_seal_type == 'shamir'
+  ansible.builtin.assert:
+    that:
+      - not (vault_unseal | bool)
+    fail_msg: >-
+      vault_init_pgp_keys encrypts every unseal share, so the role cannot
+      unseal Vault with them. Set vault_unseal: false and unseal manually with
+      the decrypted shares (gpg -d), or drop vault_init_pgp_keys.
+    quiet: true
+  tags: always
+
 - name: Validate init output encryption has a password file when encryption is requested
   when:
     - vault_init | bool

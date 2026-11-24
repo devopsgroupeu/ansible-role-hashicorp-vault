@@ -127,49 +127,83 @@
     - __vault_init_file_preinit['stat']['exists'] | default(false) | bool
   tags: init_unseal
 
-- name: Initialize Vault (bootstrap node, Shamir)
-  ansible.builtin.command: >-
-    {{ vault_bin_path }} operator init
-    -format=json
-    -key-shares={{ vault_init_key_shares }}
-    -key-threshold={{ vault_init_key_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
-    -pgp-keys={{ vault_init_pgp_keys | join(',') }}{%- endif %}
-  environment:
-    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-  delegate_to: "{{ vault_init_bootstrap_node }}"
-  run_once: true
-  register: __vault_init_shamir_result
-  changed_when: true
-  no_log: true
+# vault operator init takes -pgp-keys / -recovery-pgp-keys as comma-separated
+# PATHS to files holding the public keys (or keybase:<user>), not inline key
+# data. Write each key to a private temp dir on the bootstrap node and always
+# remove it afterwards. Vault reads a file that holds a base64 or an
+# ASCII-armored key, so the configured base64 string is written as is.
+- name: Initialize Vault on the bootstrap node
   when:
     - vault_init | bool
-    - vault_seal_type == 'shamir'
     - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
     - not ansible_check_mode
   tags: init_unseal
+  block:
+    - name: Create a temporary directory for PGP public keys (bootstrap node)
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: .vault-pgp
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      register: __vault_pgp_tmpdir
+      when: vault_init_pgp_keys | length > 0
 
-- name: Initialize Vault (bootstrap node, auto-unseal recovery keys)
-  ansible.builtin.command: >-
-    {{ vault_bin_path }} operator init
-    -format=json
-    -recovery-shares={{ vault_init_recovery_shares }}
-    -recovery-threshold={{ vault_init_recovery_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
-    -pgp-keys={{ vault_init_pgp_keys | join(',') }}{%- endif %}
-  environment:
-    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-  delegate_to: "{{ vault_init_bootstrap_node }}"
-  run_once: true
-  register: __vault_init_autounseal_result
-  changed_when: true
-  no_log: true
-  when:
-    - vault_init | bool
-    - vault_seal_type != 'shamir'
-    - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
-    - not ansible_check_mode
-  tags: init_unseal
+    - name: Write PGP public keys to files (bootstrap node)
+      ansible.builtin.copy:
+        content: "{{ item }}"
+        dest: "{{ __vault_pgp_tmpdir['path'] }}/key{{ __vault_pgp_key_idx }}.pub"
+        mode: "0600"
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      loop: "{{ vault_init_pgp_keys }}"
+      loop_control:
+        index_var: __vault_pgp_key_idx
+        label: "key{{ __vault_pgp_key_idx }}.pub"
+      register: __vault_pgp_key_files
+      when: vault_init_pgp_keys | length > 0
+
+    - name: Initialize Vault (bootstrap node, Shamir)
+      ansible.builtin.command: >-
+        {{ vault_bin_path }} operator init
+        -format=json
+        -key-shares={{ vault_init_key_shares }}
+        -key-threshold={{ vault_init_key_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
+        -pgp-keys={{ __vault_pgp_key_files['results'] | map(attribute='dest') | join(',') }}{%- endif %}
+      environment:
+        VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
+        VAULT_CACERT: "{{ vault_tls_ca_file }}"
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      register: __vault_init_shamir_result
+      changed_when: true
+      no_log: true
+      when: vault_seal_type == 'shamir'
+
+    - name: Initialize Vault (bootstrap node, auto-unseal recovery keys)
+      ansible.builtin.command: >-
+        {{ vault_bin_path }} operator init
+        -format=json
+        -recovery-shares={{ vault_init_recovery_shares }}
+        -recovery-threshold={{ vault_init_recovery_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
+        -recovery-pgp-keys={{ __vault_pgp_key_files['results'] | map(attribute='dest') | join(',') }}{%- endif %}
+      environment:
+        VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
+        VAULT_CACERT: "{{ vault_tls_ca_file }}"
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      register: __vault_init_autounseal_result
+      changed_when: true
+      no_log: true
+      when: vault_seal_type != 'shamir'
+
+  always:
+    - name: Remove the temporary PGP key directory (bootstrap node)
+      ansible.builtin.file:
+        path: "{{ __vault_pgp_tmpdir['path'] }}"
+        state: absent
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      when: __vault_pgp_tmpdir['path'] is defined
 
 # ------------------------------------------------------------------------------
 # 4. Parse init JSON → extract keys + root_token
