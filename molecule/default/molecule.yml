@@ -19,6 +19,8 @@ platforms:
 
 provisioner:
   name: ansible
+  playbooks:
+    side_effect: side_effect_check_mode.yml
   env:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
   config_options:
@@ -47,6 +49,7 @@ scenario:
     - prepare
     - converge
     - idempotence
+    - side_effect side_effect_check_mode.yml
     - verify
     - cleanup
     - destroy

@@ -37,6 +37,7 @@
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
     VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
   register: __vault_audit_list_cmd
+  check_mode: false
   changed_when: false
   failed_when: __vault_audit_list_cmd['rc'] not in [0, 2]
   no_log: true
@@ -92,4 +93,5 @@
     - not (__vault_left_sealed | default(false) | bool)
     - __vault_audit_devices is defined
     - vault_audit_path not in (__vault_audit_devices | default({}))
+    - not ansible_check_mode
   tags: audit

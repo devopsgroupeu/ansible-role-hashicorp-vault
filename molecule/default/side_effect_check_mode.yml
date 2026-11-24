@@ -1,0 +1,41 @@
+---
+# Side effect: run converge.yml again with --check --diff against the
+# converged node. A healthy deployment must report no changes and no failures,
+# and must not spin in the status wait loops.
+
+- name: Check mode run on a converged node
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml with --check --diff
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+          - --check
+          - --diff
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __check_run
+      changed_when: false
+      failed_when: false
+
+    - name: Show the check mode play recap
+      ansible.builtin.debug:
+        msg: "{{ __check_run['stdout_lines'] | select('search', 'ok=') | list }}"
+
+    - name: Assert check mode reported no changes, no failures and did not spin
+      ansible.builtin.assert:
+        that:
+          - __check_run['rc'] == 0
+          - __check_run['stdout'] is not search('changed=[1-9]')
+          - __check_run['stdout'] is not search('failed=[1-9]')
+          - >-
+            ((__check_run['end'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))
+            - (__check_run['start'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))).total_seconds() < 60
+        # A full converge pass takes about 30 s here; a probe spinning in the
+        # wait loops takes minutes, so 60 s separates the two.
+        fail_msg: "Check mode run failed, changed something or took 60 s or more: {{ __check_run['stdout_lines'][-15:] }}"

@@ -19,6 +19,7 @@
     VAULT_ADDR: "{{ vault_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   register: __vault_status_cmd
+  check_mode: false
   changed_when: false
   failed_when: __vault_status_cmd['rc'] not in [0, 1, 2]
   tags: init_unseal
@@ -48,6 +49,7 @@
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_bootstrap_status_cmd
+  check_mode: false
   changed_when: false
   failed_when: __vault_bootstrap_status_cmd['rc'] not in [0, 1, 2]
   tags: init_unseal
@@ -86,6 +88,7 @@
     - vault_init | bool
     - vault_seal_type == 'shamir'
     - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
+    - not ansible_check_mode
   tags: init_unseal
 
 - name: Initialize Vault (bootstrap node, auto-unseal recovery keys)
@@ -107,6 +110,7 @@
     - vault_init | bool
     - vault_seal_type != 'shamir'
     - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
+    - not ansible_check_mode
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -298,6 +302,7 @@
     VAULT_ADDR: "{{ vault_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   register: __vault_status_post_init_cmd
+  check_mode: false
   changed_when: false
   failed_when: __vault_status_post_init_cmd['rc'] not in [0, 1, 2]
   tags: init_unseal
@@ -418,6 +423,7 @@
     - __vault_status['initialized'] | default(false) | bool
     - __vault_status['sealed'] | default(true) | bool
     - __vault_unseal_keys is defined
+    - not ansible_check_mode
   tags: init_unseal
 
 # (c) Wait for the leader to report active/unsealed before followers attempt to
@@ -448,6 +454,7 @@
     - inventory_hostname == vault_init_bootstrap_node
     - vault_unseal | bool
     - __vault_unseal_keys is defined
+    - not ansible_check_mode
   tags: init_unseal
 
 # (d) Wait for follower nodes to become initialized via Raft join.
@@ -480,6 +487,7 @@
     - vault_unseal | bool
     - inventory_hostname != vault_init_bootstrap_node
     - not (__vault_status.get('initialized', false) | bool)
+    - not ansible_check_mode
   tags: init_unseal
 
 # (e) Re-probe follower status (now initialized+sealed) then unseal followers.
@@ -518,6 +526,7 @@
     - __vault_status['initialized'] | default(false) | bool
     - __vault_status['sealed'] | default(true) | bool
     - __vault_unseal_keys is defined
+    - not ansible_check_mode
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -551,8 +560,9 @@
   # Shamir: only wait when this run was asked to unseal. Auto-unseal: the seal
   # provider unseals on startup, so wait whenever init or unseal is enabled.
   when: >-
+    not ansible_check_mode and (
     (vault_seal_type == 'shamir' and vault_unseal | bool and __vault_unseal_keys is defined)
-    or (vault_seal_type != 'shamir' and (vault_init | bool or vault_unseal | bool))
+    or (vault_seal_type != 'shamir' and (vault_init | bool or vault_unseal | bool)))
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -597,6 +607,7 @@
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_raft_peers_cmd
+  check_mode: false
   changed_when: false
   # failed_when is intentionally omitted so that Ansible fails the task when
   # retries are exhausted without meeting the until condition. With failed_when:
