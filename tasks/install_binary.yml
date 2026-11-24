@@ -111,11 +111,33 @@
 
     - name: Verify SHA256SUMS signature
       ansible.builtin.command: >-
-        gpg --batch --no-default-keyring
+        gpg --batch --status-fd 1 --no-default-keyring
         --keyring {{ __vault_tmpdir }}/hashicorp.gpg
         --verify {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS.sig
         {{ __vault_tmpdir }}/vault_{{ vault_version }}_SHA256SUMS
+      register: __vault_gpg_verify
       changed_when: false
+      when: vault_binary_verify_gpg | bool
+
+    # The key is fetched at run time, so a good signature alone only proves
+    # that SHA256SUMS matches whatever key was downloaded. Pin the signer: the
+    # last field of a VALIDSIG status line is the primary key fingerprint.
+    - name: Assert SHA256SUMS is signed by the pinned HashiCorp key
+      ansible.builtin.assert:
+        that:
+          - (vault_binary_gpg_fingerprint | replace(' ', '') | upper) in __vault_gpg_validsig_fprs
+        fail_msg: >-
+          SHA256SUMS for Vault {{ vault_version }} is not signed by the pinned
+          key {{ vault_binary_gpg_fingerprint }} (signed by:
+          {{ __vault_gpg_validsig_fprs | join(', ') | default('none', true) }}).
+          Refusing to install. Check vault_binary_gpg_key_url and
+          vault_binary_gpg_fingerprint.
+        quiet: true
+      vars:
+        __vault_gpg_validsig_fprs: >-
+          {{ __vault_gpg_verify['stdout_lines']
+             | select('match', '^.GNUPG:. VALIDSIG ')
+             | map('split') | map('last') | map('upper') | list }}
       when: vault_binary_verify_gpg | bool
 
     # Verify the zip checksum against the signed SHA256SUMS file.

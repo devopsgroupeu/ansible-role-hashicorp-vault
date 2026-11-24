@@ -35,6 +35,11 @@ vault_binary_gpg_key_url: "https://www.hashicorp.com/.well-known/pgp-key.txt"
 # air-gapped environments where you have already verified the checksum offline.
 vault_binary_verify_gpg: true
 
+# Primary key fingerprint that must have signed SHA256SUMS (binary method,
+# checked when vault_binary_verify_gpg is true). The default is HashiCorp's
+# release signing key (expires 2030-03-01). Spaces are ignored.
+vault_binary_gpg_fingerprint: "C874011F0AB405110D02105534365D9472D7468F"
+
 # CPU architecture string used in repo and binary download paths. Explicit
 # amd64/arm64 map; any other architecture resolves to "" and is rejected by
 # validate.yml (this role supports amd64 and arm64 only).

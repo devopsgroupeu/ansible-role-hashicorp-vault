@@ -37,6 +37,7 @@ is prefixed `vault_`.
 | `vault_binary_base_url` | `"https://releases.hashicorp.com/vault"` | Root URL for binary zip downloads (binary install method). |
 | `vault_binary_gpg_key_url` | `"https://www.hashicorp.com/.well-known/pgp-key.txt"` | HashiCorp PGP key URL for verifying `SHA256SUMS.sig` (binary method). |
 | `vault_binary_verify_gpg` | `true` | GPG-verify `SHA256SUMS.sig` before extracting. Set `false` only in air-gapped envs where you have already verified the checksum offline. |
+| `vault_binary_gpg_fingerprint` | `"C874011F0AB405110D02105534365D9472D7468F"` | Primary key fingerprint that must have signed `SHA256SUMS` (binary method, when `vault_binary_verify_gpg` is true). The default is HashiCorp's release signing key (expires 2030-03-01). The role fails before extracting when the signature comes from any other key. Spaces are ignored. |
 | `vault_arch` | `"amd64"` / `"arm64"` | CPU architecture string for repo and binary paths. Auto-detected from `ansible_facts['architecture']`. |
 
 ---

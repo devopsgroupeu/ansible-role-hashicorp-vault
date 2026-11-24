@@ -1,7 +1,8 @@
 ---
 # binary scenario - single node with vault_install_method: binary on a clean
 # image (no gpg, no unzip). converge and idempotence prove the prerequisites
-# are installed and a second run downloads nothing.
+# are installed and a second run downloads nothing; the side effect proves a
+# signature from a key other than vault_binary_gpg_fingerprint is rejected.
 
 dependency:
   name: galaxy
@@ -23,6 +24,8 @@ platforms:
 
 provisioner:
   name: ansible
+  playbooks:
+    side_effect: side_effect_wrong_fingerprint.yml
   env:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
   config_options:
@@ -51,6 +54,7 @@ scenario:
     - prepare
     - converge
     - idempotence
+    - side_effect side_effect_wrong_fingerprint.yml
     - verify
     - cleanup
     - destroy

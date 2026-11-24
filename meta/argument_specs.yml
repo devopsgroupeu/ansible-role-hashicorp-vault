@@ -75,6 +75,15 @@ argument_specs:
         default: true
         description: GPG-verify SHA256SUMS.sig before extracting the binary.
 
+      vault_binary_gpg_fingerprint:
+        type: str
+        required: false
+        default: "C874011F0AB405110D02105534365D9472D7468F"
+        description: >
+          Primary key fingerprint that must have signed SHA256SUMS (binary
+          method, when vault_binary_verify_gpg is true). Defaults to
+          HashiCorp's release signing key. Spaces are ignored.
+
       vault_arch:
         type: str
         required: false

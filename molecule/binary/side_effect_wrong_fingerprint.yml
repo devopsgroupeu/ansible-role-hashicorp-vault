@@ -1,0 +1,80 @@
+---
+# Side effect: a SHA256SUMS signature from any key other than the pinned one
+# must fail before extraction. Remove the installed binary, converge with a
+# wrong vault_binary_gpg_fingerprint and expect a failure and no binary; then
+# converge with the default fingerprint to restore the node for verify.
+
+- name: Remove the installed Vault binary
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Remove /usr/local/bin/vault
+      ansible.builtin.file:
+        path: /usr/local/bin/vault
+        state: absent
+
+- name: Converge with a wrong signing key fingerprint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml with a wrong fingerprint
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+          - --extra-vars
+          - '{"vault_binary_gpg_fingerprint": "0000000000000000000000000000000000000000"}'
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __fpr_run
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the run failed at the fingerprint check
+      ansible.builtin.assert:
+        that:
+          - __fpr_run['rc'] != 0
+          # The failure message (printed on stdout or stderr, possibly
+          # wrapped) names the wrong fingerprint; nothing else prints it.
+          - "'Assert SHA256SUMS is signed by the pinned HashiCorp key' in __fpr_run['stdout']"
+          - "'0000000000000000000000000000000000000000' in (__fpr_run['stdout'] ~ __fpr_run['stderr'])"
+          - "'Extract Vault binary to /usr/local/bin' not in __fpr_run['stdout']"
+        fail_msg: "Wrong fingerprint did not fail at the pin check: {{ __fpr_run['stdout_lines'][-40:] }} {{ __fpr_run['stderr_lines'][-20:] }}"
+
+- name: Check that no binary was installed
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stat /usr/local/bin/vault
+      ansible.builtin.stat:
+        path: /usr/local/bin/vault
+      register: __fpr_bin
+
+    - name: Assert /usr/local/bin/vault does not exist
+      ansible.builtin.assert:
+        that:
+          - not __fpr_bin['stat']['exists']
+        fail_msg: "/usr/local/bin/vault exists although the signature check failed"
+
+- name: Restore the binary with the default fingerprint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __fpr_restore
+      changed_when: false
+      failed_when: __fpr_restore['rc'] != 0
