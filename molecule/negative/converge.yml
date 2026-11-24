@@ -150,3 +150,80 @@
             that:
               - ansible_failed_task['name'] == 'Wait for leader to report unsealed status (Shamir)'
             fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
+
+# ------------------------------------------------------------------------------
+# Case 4 (V-03): a fresh node must not be initialized over an existing
+# controller init file (another cluster's root token and keys).
+# ------------------------------------------------------------------------------
+- name: Case 4 - existing controller init file blocks a fresh init
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: true
+  tasks:
+    - name: Reset to a fresh Vault
+      ansible.builtin.include_tasks: tasks/reset_vault.yml
+
+    - name: Write a dummy init file of another cluster
+      ansible.builtin.copy:
+        content: '{"root_token": "other-cluster", "unseal_keys_hex": []}'
+        dest: /tmp/.vault_init_molecule_negative.json
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Stat the dummy init file
+      ansible.builtin.stat:
+        path: /tmp/.vault_init_molecule_negative.json
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: __case_dummy_before
+
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although an init file already existed"
+      rescue:
+        - name: Assert the init file guard fired
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Refuse to overwrite an existing controller init file'
+            fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      failed_when: __case_status['rc'] != 2
+
+    - name: Stat the dummy init file again
+      ansible.builtin.stat:
+        path: /tmp/.vault_init_molecule_negative.json
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: __case_dummy_after
+
+    - name: Assert Vault stayed uninitialized and the file is untouched
+      ansible.builtin.assert:
+        that:
+          - not ((__case_status['stdout'] | from_json)['initialized'] | bool)
+          - __case_dummy_after['stat']['checksum'] == __case_dummy_before['stat']['checksum']
+
+    - name: Remove the dummy init file
+      ansible.builtin.file:
+        path: /tmp/.vault_init_molecule_negative.json
+        state: absent
+      delegate_to: localhost
+      become: false

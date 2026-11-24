@@ -93,7 +93,39 @@
 
 # ------------------------------------------------------------------------------
 # 3. Initialize Vault — bootstrap node only, only when not yet initialized
+#    Never initialize over an existing controller init file: it belongs to
+#    another cluster that shares vault_cluster_id (e.g. same first hostname) or
+#    to a previous incarnation of this one, and overwriting it would destroy its
+#    root token and unseal keys.
 # ------------------------------------------------------------------------------
+
+- name: Stat controller init file before init
+  ansible.builtin.stat:
+    path: "{{ vault_init_output_path }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_init_file_preinit
+  when:
+    - vault_init | bool
+    - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
+  tags: init_unseal
+
+- name: Refuse to overwrite an existing controller init file
+  ansible.builtin.fail:
+    msg: >-
+      init file exists for another or previous cluster; move it or set
+      vault_cluster_id. {{ vault_init_output_path }} already exists on the
+      controller but {{ vault_init_bootstrap_node }} reports
+      initialized=false, so vault operator init would overwrite the root token
+      and keys it holds. Move the file away (or set vault_cluster_id /
+      vault_init_output_path to a unique value for this cluster) and re-run.
+  run_once: true
+  when:
+    - vault_init | bool
+    - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
+    - __vault_init_file_preinit['stat']['exists'] | default(false) | bool
+  tags: init_unseal
 
 - name: Initialize Vault (bootstrap node, Shamir)
   ansible.builtin.command: >-
@@ -269,6 +301,8 @@
     content: "{{ __vault_init_json | to_nice_json }}"
     dest: "{{ vault_init_output_path }}"
     mode: "0600"
+    # Second line of defence behind the pre-init guard above.
+    backup: true
   delegate_to: localhost
   become: false
   run_once: true
