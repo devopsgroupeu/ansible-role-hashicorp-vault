@@ -39,3 +39,27 @@ __vault_ca_trust_dir:
 __vault_ca_trust_update_cmd:
   Debian: "update-ca-certificates"
   RedHat: "update-ca-trust"
+
+# Top-level vault.hcl keys and storage "raft" keys the template renders
+# itself. vault_extra_config / vault_raft_extra_parameters must not repeat
+# them: Vault fails to parse duplicate HCL attributes.
+__vault_hcl_managed_keys:
+  - disable_mlock
+  - ui
+  - log_level
+  - log_format
+  - default_lease_ttl
+  - max_lease_ttl
+  - cluster_name
+  - storage
+  - listener
+  - api_addr
+  - cluster_addr
+  - telemetry
+  - seal
+
+__vault_raft_managed_keys:
+  - path
+  - node_id
+  - performance_multiplier
+  - retry_join

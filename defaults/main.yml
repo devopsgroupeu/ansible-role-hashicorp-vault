@@ -178,12 +178,14 @@ vault_raft_node_id: "{{ inventory_hostname }}"
 # retry_join blocks and to gate init/unseal delegation.
 vault_raft_peers: "{{ groups['vault'] | default([inventory_hostname]) }}"
 
-# Raft performance multiplier. 1 = on-prem LAN tight timing (recommended).
-# Use 5 for cloud/WAN deployments with higher latency.
+# Raft performance multiplier, 1 to 10. 1 = on-prem LAN tight timing
+# (recommended). Use 5 for cloud/WAN deployments with higher latency.
 vault_raft_performance_multiplier: 1
 
 # Extra key=value pairs injected verbatim into the storage "raft" {} stanza
-# (e.g. autopilot tuning). Dict of {key: value}.
+# (e.g. autopilot tuning). Dict of {key: value} with string, number or boolean
+# values; keys the role renders itself (path, node_id, performance_multiplier,
+# retry_join) are rejected.
 vault_raft_extra_parameters: {}
 
 # ==============================================================================
@@ -337,7 +339,8 @@ vault_telemetry_unauthenticated_metrics_access: false
 # Log verbosity level.
 vault_log_level: "info"
 
-# Log format. 'json' produces structured logs suitable for log aggregators.
+# Log format: 'standard' or 'json'. 'json' produces structured logs suitable
+# for log aggregators.
 vault_log_format: "json"
 
 # Default lease TTL. Overrides Vault's built-in 768h default.
@@ -360,7 +363,10 @@ vault_manage_swap: true
 vault_enable_file_permissions_check: true
 
 # Free-form extra configuration. Dict of {key: value} rendered into vault.hcl.
-# Use for top-level HCL settings not otherwise covered by this role.
+# Use for top-level HCL settings not otherwise covered by this role. Values
+# must be strings, numbers or booleans; keys the role renders itself (e.g. ui,
+# log_level, storage, listener, seal) are rejected, because Vault fails to
+# parse duplicate attributes.
 vault_extra_config: {}
 
 # ==============================================================================
@@ -428,7 +434,8 @@ vault_manage_selinux: true
 # Enable the vault.service systemd unit at boot.
 vault_service_enabled: true
 
-# Desired systemd service state after configuration.
+# Desired systemd service state after configuration: started, stopped,
+# restarted or reloaded.
 vault_service_state: "started"
 
 # Render-only mode: when true, skip install / service management / init+unseal.

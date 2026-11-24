@@ -85,6 +85,54 @@
     quiet: true
   tags: always
 
+- name: Validate vault_raft_performance_multiplier is between 1 and 10
+  ansible.builtin.assert:
+    that:
+      - (vault_raft_performance_multiplier | int) >= 1
+      - (vault_raft_performance_multiplier | int) <= 10
+    fail_msg: >-
+      vault_raft_performance_multiplier ({{ vault_raft_performance_multiplier }})
+      must be between 1 and 10. Vault rejects values of 0 or less, and 10 is
+      the documented maximum.
+    quiet: true
+  tags: always
+
+- name: Validate vault_extra_config does not repeat role-managed keys
+  ansible.builtin.assert:
+    that:
+      - vault_extra_config.keys() | intersect(__vault_hcl_managed_keys) | length == 0
+    fail_msg: >-
+      vault_extra_config sets {{ vault_extra_config.keys() | intersect(__vault_hcl_managed_keys) | join(', ') }},
+      which the role already renders in vault.hcl. Vault fails to parse
+      duplicate attributes; use the matching vault_* variable instead.
+    quiet: true
+  tags: always
+
+- name: Validate vault_raft_extra_parameters does not repeat role-managed keys
+  ansible.builtin.assert:
+    that:
+      - vault_raft_extra_parameters.keys() | intersect(__vault_raft_managed_keys) | length == 0
+    fail_msg: >-
+      vault_raft_extra_parameters sets
+      {{ vault_raft_extra_parameters.keys() | intersect(__vault_raft_managed_keys) | join(', ') }},
+      which the role already renders in the storage "raft" stanza. Vault fails
+      to parse duplicate attributes; use the matching vault_* variable instead.
+    quiet: true
+  tags: always
+
+- name: Validate extra config values are strings, numbers or booleans
+  ansible.builtin.assert:
+    that:
+      - __vault_extra_values | reject('string') | reject('number') | reject('boolean') | list | length == 0
+    fail_msg: >-
+      vault_extra_config and vault_raft_extra_parameters only take string,
+      number or boolean values; nested dicts and lists would be rendered as
+      invalid HCL.
+    quiet: true
+  vars:
+    __vault_extra_values: "{{ (vault_extra_config.values() | list) + (vault_raft_extra_parameters.values() | list) }}"
+  tags: always
+
 - name: Validate vault_raft_peers is non-empty
   ansible.builtin.assert:
     that:

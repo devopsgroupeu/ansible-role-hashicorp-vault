@@ -323,13 +323,17 @@ argument_specs:
         required: false
         default: 1
         description: >
-          Raft performance multiplier. 1 = on-prem LAN; 5 = cloud/WAN.
+          Raft performance multiplier, 1 to 10. 1 = on-prem LAN; 5 = cloud/WAN.
 
       vault_raft_extra_parameters:
         type: dict
         required: false
         default: {}
-        description: Extra key=value pairs injected into the storage "raft" stanza.
+        description: >
+          Extra key=value pairs injected into the storage "raft" stanza. Values
+          must be strings, numbers or booleans, and keys the role renders
+          itself (path, node_id, performance_multiplier, retry_join) are
+          rejected.
 
       # ---- Seal / auto-unseal ----
       vault_seal_type:
@@ -604,6 +608,7 @@ argument_specs:
         type: str
         required: false
         default: "json"
+        choices: [standard, json]
         description: Vault log format; 'json' produces structured logs.
 
       vault_default_lease_ttl:
@@ -644,7 +649,11 @@ argument_specs:
         type: dict
         required: false
         default: {}
-        description: Free-form extra top-level HCL key=value pairs for vault.hcl.
+        description: >
+          Free-form extra top-level HCL key=value pairs for vault.hcl. Values
+          must be strings, numbers or booleans, and keys the role renders
+          itself (for example ui, log_level, storage, listener, seal) are
+          rejected: Vault fails to parse duplicate attributes.
 
       # ---- Audit ----
       vault_audit_enabled:
@@ -758,6 +767,7 @@ argument_specs:
         type: str
         required: false
         default: "started"
+        choices: [started, stopped, restarted, reloaded]
         description: Desired systemd service state after configuration.
 
       vault_config_only:

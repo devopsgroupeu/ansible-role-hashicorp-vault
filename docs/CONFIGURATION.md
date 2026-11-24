@@ -112,8 +112,8 @@ Only Raft integrated storage is supported by this role.
 | `vault_storage` | `"raft"` | Storage backend. Only `raft` is supported. |
 | `vault_raft_node_id` | `"{{ inventory_hostname }}"` | Deterministic Raft node ID. **Never use a random value** — random IDs cause split-brain on restart. |
 | `vault_raft_peers` | `groups['vault'] \| default([inventory_hostname])` | List of inventory hostnames forming the cluster. Used to render `retry_join` blocks and to gate init/unseal delegation. |
-| `vault_raft_performance_multiplier` | `1` | Raft performance multiplier. `1` = on-prem LAN tight timing (recommended). Use `5` for cloud/WAN deployments with higher latency. |
-| `vault_raft_extra_parameters` | `{}` | Extra `key = value` pairs injected verbatim into the `storage "raft" {}` stanza (e.g. autopilot tuning). Dict of `{key: value}`. |
+| `vault_raft_performance_multiplier` | `1` | Raft performance multiplier, `1` to `10` (validated). `1` = on-prem LAN tight timing (recommended). Use `5` for cloud/WAN deployments with higher latency. |
+| `vault_raft_extra_parameters` | `{}` | Extra `key = value` pairs injected verbatim into the `storage "raft" {}` stanza (e.g. autopilot tuning). Dict of `{key: value}` with string, number or boolean values. Keys the role renders itself (`path`, `node_id`, `performance_multiplier`, `retry_join`) are rejected, because Vault fails to parse duplicate attributes. |
 
 ---
 
@@ -210,13 +210,13 @@ or seal secrets run with `no_log: true`.
 | `vault_telemetry_disable_hostname` | `true` | Omit the hostname label from metrics for cleaner dashboards. |
 | `vault_telemetry_unauthenticated_metrics_access` | `false` | Allow unauthenticated `/v1/sys/metrics` access. Rendered **inside `listener "tcp" > telemetry {}`** (not top-level). Keep `false` to require a scrape token. |
 | `vault_log_level` | `"info"` | Vault log verbosity. Choices: `trace`, `debug`, `info`, `warn`, `error`. |
-| `vault_log_format` | `"json"` | Log format. `json` produces structured logs suitable for Loki / Elasticsearch. |
+| `vault_log_format` | `"json"` | Log format. Choices: `standard`, `json`. `json` produces structured logs suitable for Loki / Elasticsearch. |
 | `vault_default_lease_ttl` | `"1h"` | Default lease TTL. Overrides Vault's built-in 768h default. |
 | `vault_max_lease_ttl` | `"24h"` | Maximum lease TTL. Caps lease renewal duration. |
 | `vault_disable_mlock` | `true` | Required `true` for Raft integrated storage (BoltDB uses mmap). No deprecation exists. Pair with `vault_manage_swap: true`. |
 | `vault_manage_swap` | `true` | Run `swapoff -a` and purge `/etc/fstab` swap entries to compensate for `disable_mlock=true`. |
 | `vault_enable_file_permissions_check` | `true` | Set `VAULT_ENABLE_FILE_PERMISSIONS_CHECK=true` in `vault.env` so Vault validates file permissions on startup. |
-| `vault_extra_config` | `{}` | Free-form extra top-level `vault.hcl` key=value pairs. Dict of `{key: value}`. |
+| `vault_extra_config` | `{}` | Free-form extra top-level `vault.hcl` key=value pairs. Dict of `{key: value}` with string, number or boolean values. Keys the role renders itself (`disable_mlock`, `ui`, `log_level`, `log_format`, `default_lease_ttl`, `max_lease_ttl`, `cluster_name`, `storage`, `listener`, `api_addr`, `cluster_addr`, `telemetry`, `seal`) are rejected, because Vault fails to parse duplicate attributes. |
 
 ---
 
@@ -258,7 +258,7 @@ token from the init output (`vault_init_output_path`).
 | Variable | Default | Description |
 |---|---|---|
 | `vault_service_enabled` | `true` | Enable `vault.service` at boot. |
-| `vault_service_state` | `"started"` | Desired systemd service state after configuration. |
+| `vault_service_state` | `"started"` | Desired systemd service state after configuration. Choices: `started`, `stopped`, `restarted`, `reloaded`. |
 | `vault_config_only` | `false` | Render-only mode: skip install, service management, and init/unseal. Used by the `render` Molecule scenario for offline template validation. |
 
 ---
