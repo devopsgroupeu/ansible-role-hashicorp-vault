@@ -293,6 +293,23 @@ Or, for ephemeral/test runs where you accept plaintext storage:
 vault_init_encrypt_output: false
 ```
 
+## Validate fails: encryption password file missing or unreadable
+
+**Symptom:** The play fails in validation, before `vault operator init`, at
+"Validate init output encryption password file and output directory".
+
+**Cause:** `vault_init_encrypt_output: true` and
+`vault_init_encrypt_password_file` is set, but the file does not exist or is
+not readable by the controller user, or the directory of
+`vault_init_output_path` cannot be written or created. The role checks this up
+front so a failed encryption can never leave the root token and keys in
+plaintext.
+
+**Fix:** create the password file (or fix its path or permissions) and make
+sure the init output directory or its parent is writable. If an earlier run
+left a plaintext init file behind, the next run with a valid password file
+encrypts it.
+
 Regardless of the encryption setting, **never commit the init file** — it contains
 unseal keys (Shamir) or recovery keys plus the initial root token.
 

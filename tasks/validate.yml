@@ -146,6 +146,66 @@
     quiet: true
   tags: always
 
+# Fail closed: a missing or unreadable password file used to be found only
+# after vault operator init had written the root token and keys in plaintext.
+- name: Stat init output encryption password file on the controller
+  ansible.builtin.stat:
+    path: "{{ vault_init_encrypt_password_file }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_encrypt_password_file_stat
+  when:
+    - vault_init | bool
+    - not vault_config_only | bool
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+  tags: always
+
+- name: Stat controller init output directory and its parent
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  loop:
+    - "{{ vault_init_output_path | dirname }}"
+    - "{{ vault_init_output_path | dirname | dirname }}"
+  register: __vault_init_output_dir_stat
+  when:
+    - vault_init | bool
+    - not vault_config_only | bool
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+  tags: always
+
+- name: Validate init output encryption password file and output directory
+  ansible.builtin.assert:
+    that:
+      - __vault_encrypt_password_file_stat['stat']['exists']
+      - __vault_encrypt_password_file_stat['stat']['readable']
+      - >-
+        (__vault_init_output_dir_stat['results'][0]['stat']['exists']
+        and __vault_init_output_dir_stat['results'][0]['stat']['writeable'])
+        or (not __vault_init_output_dir_stat['results'][0]['stat']['exists']
+        and __vault_init_output_dir_stat['results'][1]['stat']['exists']
+        and __vault_init_output_dir_stat['results'][1]['stat']['writeable'])
+    fail_msg: >-
+      vault_init_encrypt_output is true but the password file
+      {{ vault_init_encrypt_password_file }} does not exist or is not readable
+      on the controller, or the init output directory
+      {{ vault_init_output_path | dirname }} cannot be written or created.
+      This check runs BEFORE 'vault operator init', so no init material is
+      written in plaintext. Fix the path or permissions and re-run.
+    quiet: true
+  run_once: true
+  when:
+    - vault_init | bool
+    - not vault_config_only | bool
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+  tags: always
+
 - name: Validate BYO TLS cert files are provided when not generating certs
   when:
     - vault_tls_enabled | bool

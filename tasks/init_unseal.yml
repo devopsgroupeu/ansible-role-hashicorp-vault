@@ -247,7 +247,7 @@
 # 5. Persist init JSON to the Ansible controller (never to a target host)
 #    Written to vault_init_output_path with mode 0600.
 #    Optionally ansible-vault encrypted (when vault_init_encrypt_output=true
-#    AND vault_init_encrypt_password_file is set).
+#    AND vault_init_encrypt_password_file is set); see section 5c.
 # ------------------------------------------------------------------------------
 
 - name: Fail when init encryption requested but no password file is set
@@ -309,42 +309,6 @@
   no_log: true
   when:
     - __vault_init_json is defined
-  tags: init_unseal
-
-# Check whether the init file is already ansible-vault encrypted (starts with
-# $ANSIBLE_VAULT) to make the encrypt step idempotent on re-runs.
-- name: Read first bytes of init file to detect existing encryption
-  ansible.builtin.command: >-
-    head -c 14 {{ vault_init_output_path }}
-  delegate_to: localhost
-  become: false
-  run_once: true
-  register: __vault_init_file_header
-  changed_when: false
-  no_log: true
-  when:
-    - __vault_init_json is defined
-    - vault_init_encrypt_output | bool
-    - vault_init_encrypt_password_file | length > 0
-  tags: init_unseal
-
-- name: Encrypt init JSON with ansible-vault on controller
-  ansible.builtin.command: >-
-    ansible-vault encrypt
-    --vault-password-file {{ vault_init_encrypt_password_file }}
-    {{ vault_init_output_path }}
-  delegate_to: localhost
-  become: false
-  run_once: true
-  register: __vault_encrypt_result
-  changed_when: __vault_encrypt_result['rc'] == 0
-  failed_when: __vault_encrypt_result['rc'] != 0
-  no_log: true
-  when:
-    - __vault_init_json is defined
-    - vault_init_encrypt_output | bool
-    - vault_init_encrypt_password_file | length > 0
-    - __vault_init_file_header['stdout'] | default('') != '$ANSIBLE_VAULT'
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -439,6 +403,63 @@
     - inventory_hostname != vault_init_bootstrap_node
     - __vault_unseal_keys is not defined
     - hostvars[vault_init_bootstrap_node]['__vault_unseal_keys'] is defined
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
+# 5c. Encrypt the controller init file with ansible-vault. Runs whenever
+#     encryption is requested and the file exists, not only after a fresh
+#     init, so a plaintext file left by an earlier failed run gets encrypted on
+#     the next run. It runs after the self-heal load above so that load can
+#     still read such a plaintext file in this run.
+#     The header check ($ANSIBLE_VAULT) keeps the step idempotent.
+# ------------------------------------------------------------------------------
+
+- name: Stat controller init file before encryption
+  ansible.builtin.stat:
+    path: "{{ vault_init_output_path }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_init_file_enc_stat
+  when:
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+  tags: init_unseal
+
+- name: Read first bytes of init file to detect existing encryption
+  ansible.builtin.command: >-
+    head -c 14 {{ vault_init_output_path }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_init_file_header
+  check_mode: false
+  changed_when: false
+  no_log: true
+  when:
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+    - __vault_init_file_enc_stat['stat']['exists'] | default(false) | bool
+  tags: init_unseal
+
+- name: Encrypt init JSON with ansible-vault on controller
+  ansible.builtin.command: >-
+    ansible-vault encrypt
+    --vault-password-file {{ vault_init_encrypt_password_file }}
+    {{ vault_init_output_path }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_encrypt_result
+  changed_when: __vault_encrypt_result['rc'] == 0
+  failed_when: __vault_encrypt_result['rc'] != 0
+  no_log: true
+  when:
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+    - __vault_init_file_enc_stat['stat']['exists'] | default(false) | bool
+    - __vault_init_file_header['stdout'] | default('') != '$ANSIBLE_VAULT'
+    - not ansible_check_mode
   tags: init_unseal
 
 # ------------------------------------------------------------------------------

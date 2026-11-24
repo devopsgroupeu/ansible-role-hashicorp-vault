@@ -1,0 +1,11 @@
+---
+# Plain role run, used by cases in converge.yml that re-run the role in a
+# nested ansible-playbook call (e.g. with --vault-password-file).
+- name: Converge the role
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
