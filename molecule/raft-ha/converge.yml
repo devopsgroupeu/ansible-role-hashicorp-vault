@@ -12,7 +12,9 @@
 #     hostnames + IPs ensures the shared CA cert can be used for retry_join mTLS.
 #
 # Init/unseal notes:
-#   - vault_init_bootstrap_node defaults to vault_raft_peers[0] = 'vault1'.
+#   - vault_init_bootstrap_node is 'vault1' unless MOLECULE_VAULT_BOOTSTRAP_NODE
+#     is set (e.g. vault2, to prove delegated tasks target the bootstrap node's
+#     own API address and not the first host's).
 #   - Init runs once on vault1 (run_once + delegate_to).
 #   - Shamir unseal runs on all nodes (each needs the key; init_unseal.yml handles
 #     distributing the unseal key from the controller to every sealed node).
@@ -29,6 +31,9 @@
       - vault1
       - vault2
       - vault3
+
+    # Bootstrap node: vault1 by default, overridable for the bootstrap2 run.
+    vault_init_bootstrap_node: "{{ lookup('ansible.builtin.env', 'MOLECULE_VAULT_BOOTSTRAP_NODE') | default('vault1', true) }}"
 
     # Per-node addressing: each node advertises its own container hostname.
     # vault_api_addr and vault_cluster_addr are set via inventory_hostname so each

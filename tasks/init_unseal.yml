@@ -5,6 +5,27 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
+# 0. Resolve the bootstrap node's API address.
+#    Tasks delegated to the bootstrap node with run_once are templated with the
+#    variables of the first host in the batch, not the delegate. Record every
+#    node's own vault_api_addr, then pick the bootstrap node's value for
+#    VAULT_ADDR in every delegated task. When the bootstrap node is outside
+#    this batch (--limit/serial), fall back to its inventory vault_api_addr.
+# ------------------------------------------------------------------------------
+
+- name: Record the API address of every node
+  ansible.builtin.set_fact:
+    __vault_api_addr_resolved: "{{ vault_api_addr }}"
+  tags: init_unseal
+
+- name: Resolve the bootstrap node API address for delegated tasks
+  ansible.builtin.set_fact:
+    __vault_bootstrap_api_addr: >-
+      {{ hostvars[vault_init_bootstrap_node]['__vault_api_addr_resolved']
+         | default(hostvars[vault_init_bootstrap_node]['vault_api_addr'] | default(vault_api_addr)) }}
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
 # 1. Status probe — run on every node
 #    Vault 2.x exit codes: 0 = unsealed, 1 = error/unreachable, 2 = sealed.
 #    Both rc=0 and rc=2 produce valid JSON stdout; rc=1 produces no usable JSON.
@@ -48,7 +69,7 @@
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
   environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
@@ -82,7 +103,7 @@
     -key-threshold={{ vault_init_key_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
     -pgp-keys={{ vault_init_pgp_keys | join(',') }}{%- endif %}
   environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
@@ -104,7 +125,7 @@
     -recovery-threshold={{ vault_init_recovery_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
     -pgp-keys={{ vault_init_pgp_keys | join(',') }}{%- endif %}
   environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
@@ -606,7 +627,7 @@
   ansible.builtin.command: >-
     {{ vault_bin_path }} operator raft list-peers -format=json
   environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
+    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
     VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"

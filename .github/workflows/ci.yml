@@ -111,10 +111,16 @@ jobs:
   molecule-raft-ha:
     # Heavy 3-node HA scenario — triggered manually via workflow_dispatch only.
     # Requires Docker with adequate resources to run 3 systemd containers concurrently.
-    name: molecule / raft-ha
+    name: molecule / raft-ha / bootstrap ${{ matrix.bootstrap }}
     runs-on: ubuntu-latest
     needs: lint
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_raft_ha == 'true' }}
+    strategy:
+      fail-fast: false
+      # vault2 as bootstrap node proves delegated tasks use the bootstrap
+      # node's own API address rather than the first host's.
+      matrix:
+        bootstrap: [vault1, vault2]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -131,6 +137,7 @@ jobs:
           PY_COLORS: "1"
           ANSIBLE_FORCE_COLOR: "1"
           MOLECULE_DISTRO: debian12
+          MOLECULE_VAULT_BOOTSTRAP_NODE: ${{ matrix.bootstrap }}
 
   ci-success:
     name: ci-success

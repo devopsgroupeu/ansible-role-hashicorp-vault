@@ -4,7 +4,8 @@
 #   - All nodes initialized and unsealed
 #   - Raft peer count = 3 and all voters
 #   - Autopilot reports healthy
-#   - Bootstrap node (vault1) is active leader; others are standby
+#   - Bootstrap node (vault1, or MOLECULE_VAULT_BOOTSTRAP_NODE) is the active
+#     leader; others are standby
 
 - name: Verify all raft-ha nodes
   hosts: all
@@ -82,7 +83,7 @@
 # --- raft peer count + autopilot + ha_mode (run on bootstrap node only) -------
 
 - name: Verify Raft cluster state on bootstrap node
-  hosts: vault1
+  hosts: "{{ lookup('ansible.builtin.env', 'MOLECULE_VAULT_BOOTSTRAP_NODE') | default('vault1', true) }}"
   become: true
   gather_facts: false
   vars:
@@ -183,13 +184,13 @@
           # (is_self means this node is the one we queried AND it is the active node).
           - __verify_bootstrap_status['ha_enabled'] | bool
           - __verify_bootstrap_status['is_self'] | default(false) | bool
-        fail_msg: "vault1 does not appear to be the active Vault leader (ha_enabled or is_self not set)"
-        success_msg: "vault1 is the active Vault leader"
+        fail_msg: "{{ inventory_hostname }} does not appear to be the active Vault leader (ha_enabled or is_self not set)"
+        success_msg: "{{ inventory_hostname }} is the active Vault leader"
 
 # --- Verify follower nodes are standby ----------------------------------------
 
 - name: Verify follower nodes are standby
-  hosts: vault2,vault3
+  hosts: "all:!{{ lookup('ansible.builtin.env', 'MOLECULE_VAULT_BOOTSTRAP_NODE') | default('vault1', true) }}"
   become: true
   gather_facts: false
   vars:
