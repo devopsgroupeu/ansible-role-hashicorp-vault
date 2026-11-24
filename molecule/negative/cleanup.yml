@@ -1,0 +1,10 @@
+---
+# Remove the controller-side init file so the next run starts clean.
+- name: Cleanup negative scenario controller files
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Remove controller init file
+      ansible.builtin.file:
+        path: /tmp/.vault_init_molecule_negative.json
+        state: absent

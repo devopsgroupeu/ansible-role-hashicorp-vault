@@ -430,7 +430,13 @@
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   register: __vault_leader_unseal_probe
   changed_when: false
-  failed_when: __vault_leader_unseal_probe['rc'] not in [0, 1, 2]
+  # failed_when mirrors until: when failed_when is set it overrides the failure
+  # Ansible records on exhausted retries, so a plain 'rc not in [0, 1, 2]' would
+  # let a still-sealed leader pass as ok.
+  failed_when: >-
+    not (__vault_leader_unseal_probe['rc'] == 0 and
+    __vault_leader_unseal_probe['stdout'] | length > 0 and
+    not (__vault_leader_unseal_probe['stdout'] | from_json)['sealed'] | default(true) | bool)
   until: >-
     __vault_leader_unseal_probe['rc'] == 0 and
     __vault_leader_unseal_probe['stdout'] | length > 0 and
@@ -440,7 +446,7 @@
   when:
     - vault_seal_type == 'shamir'
     - inventory_hostname == vault_init_bootstrap_node
-    - vault_init | bool or vault_unseal | bool
+    - vault_unseal | bool
     - __vault_unseal_keys is defined
   tags: init_unseal
 
@@ -459,7 +465,11 @@
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   register: __vault_follower_init_probe
   changed_when: false
-  failed_when: __vault_follower_init_probe['rc'] not in [0, 1, 2]
+  # failed_when mirrors until (see the leader wait). An initialized follower is
+  # still sealed here (rc=2), so failing on rc alone would be wrong.
+  failed_when: >-
+    not (__vault_follower_init_probe['stdout'] | length > 0
+    and (__vault_follower_init_probe['stdout'] | from_json).get('initialized', false) | bool)
   retries: 30
   delay: 10
   until: >-
@@ -524,7 +534,11 @@
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
   register: __vault_post_unseal_cmd
   changed_when: false
-  failed_when: __vault_post_unseal_cmd['rc'] not in [0, 1, 2]
+  # failed_when mirrors until (see the leader wait).
+  failed_when: >-
+    not (__vault_post_unseal_cmd['rc'] == 0 and
+    __vault_post_unseal_cmd['stdout'] | length > 0 and
+    not (__vault_post_unseal_cmd['stdout'] | from_json)['sealed'] | default(true) | bool)
   until: >-
     __vault_post_unseal_cmd['rc'] == 0 and
     __vault_post_unseal_cmd['stdout'] | length > 0 and
@@ -534,9 +548,34 @@
   # almost immediately; real-world multi-node succeeds well within this window.
   retries: 24
   delay: 5
-  when:
-    - vault_init | bool or vault_unseal | bool
-    - __vault_unseal_keys is defined or vault_seal_type != 'shamir'
+  # Shamir: only wait when this run was asked to unseal. Auto-unseal: the seal
+  # provider unseals on startup, so wait whenever init or unseal is enabled.
+  when: >-
+    (vault_seal_type == 'shamir' and vault_unseal | bool and __vault_unseal_keys is defined)
+    or (vault_seal_type != 'shamir' and (vault_init | bool or vault_unseal | bool))
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
+# 7a. Shamir with vault_unseal=false leaves the node sealed on purpose. Raft
+#     verify and audit need an unsealed node, so skip them and say why.
+# ------------------------------------------------------------------------------
+
+- name: Determine whether Vault is left sealed because vault_unseal is false
+  ansible.builtin.set_fact:
+    __vault_left_sealed: >-
+      {{ vault_seal_type == 'shamir'
+         and not (vault_unseal | bool)
+         and (__vault_status['sealed'] | default(true) | bool) }}
+  tags: init_unseal
+
+- name: Report that Vault is left sealed (vault_unseal is false)
+  ansible.builtin.debug:
+    msg: >-
+      Vault on {{ inventory_hostname }} is sealed and vault_unseal is false.
+      Unseal it manually (vault operator unseal) with the keys saved in
+      {{ vault_init_output_path }}. Raft formation verify and audit device
+      setup were skipped.
+  when: __vault_left_sealed | bool
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -576,6 +615,7 @@
   when:
     - __vault_root_token is defined
     - __vault_root_token | length > 0
+    - not (__vault_left_sealed | default(false) | bool)
   tags: init_unseal
 
 - name: Assert all Raft peers are voters
@@ -593,5 +633,6 @@
   when:
     - __vault_root_token is defined
     - __vault_root_token | length > 0
+    - not (__vault_left_sealed | default(false) | bool)
     - __vault_raft_peers_cmd is defined
   tags: init_unseal

@@ -55,7 +55,8 @@
         VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
       register: __verify_vault_status_cmd
       changed_when: false
-      failed_when: __verify_vault_status_cmd['rc'] not in [0, 2]
+      # Mirror until: failed_when overrides the failure from exhausted retries.
+      failed_when: __verify_vault_status_cmd['rc'] != 0
       retries: 6
       delay: 5
       until: __verify_vault_status_cmd['rc'] == 0

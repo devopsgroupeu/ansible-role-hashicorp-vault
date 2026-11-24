@@ -45,6 +45,7 @@
   when:
     - __vault_root_token is defined
     - __vault_root_token | length > 0
+    - not (__vault_left_sealed | default(false) | bool)
   tags: audit
 
 # rc=2 from 'vault audit list' means no devices enabled yet (empty list).
@@ -88,6 +89,7 @@
   when:
     - __vault_root_token is defined
     - __vault_root_token | length > 0
+    - not (__vault_left_sealed | default(false) | bool)
     - __vault_audit_devices is defined
     - vault_audit_path not in (__vault_audit_devices | default({}))
   tags: audit

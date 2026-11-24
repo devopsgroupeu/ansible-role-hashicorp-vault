@@ -1,0 +1,72 @@
+---
+# negative scenario - failure paths and fail-closed guards on one node.
+#
+# converge.yml runs one play per case. A case that expects the role to fail
+# wraps include_role in block/rescue and asserts on ansible_failed_task, so the
+# scenario itself only fails when a guard does NOT fire (or fires in the wrong
+# place). Cases run in order against the same container; see converge.yml.
+# There is no idempotence step: most cases end in an intended failure.
+
+dependency:
+  name: galaxy
+
+driver:
+  name: docker
+
+platforms:
+  - name: vault-negative
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: ""
+    groups:
+      - vault
+
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
+  config_options:
+    defaults:
+      interpreter_python: auto_silent
+      callbacks_enabled: profile_tasks, timer
+      stdout_callback: default
+    ssh_connection:
+      pipelining: false
+  inventory:
+    group_vars:
+      all:
+        ansible_user: root
+        # Shared settings for every case; plays override per case.
+        vault_raft_peers:
+          - vault-negative
+        vault_api_addr: "https://127.0.0.1:8200"
+        vault_cluster_addr: "https://127.0.0.1:8201"
+        vault_tls_generate_certs: true
+        vault_tls_install_ca_to_trust_store: false
+        vault_disable_mlock: true
+        vault_manage_swap: false
+        vault_init_encrypt_output: false
+        vault_init_output_path: "/tmp/.vault_init_molecule_negative.json"
+        # 3 shares / threshold 2, so a later case can submit too few shares
+        # and leave the leader sealed without an unseal API error.
+        vault_init_key_shares: 3
+        vault_init_key_threshold: 2
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - cleanup
+    - destroy

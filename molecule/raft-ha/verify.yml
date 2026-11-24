@@ -46,7 +46,8 @@
         VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
       register: __verify_vault_status_cmd
       changed_when: false
-      failed_when: __verify_vault_status_cmd['rc'] not in [0, 2]
+      # Mirror until: failed_when overrides the failure from exhausted retries.
+      failed_when: __verify_vault_status_cmd['rc'] != 0
       retries: 10
       delay: 6
       until: __verify_vault_status_cmd['rc'] == 0
@@ -110,10 +111,13 @@
         VAULT_TOKEN: "{{ __verify_root_token }}"
       register: __verify_raft_peers_cmd
       changed_when: false
-      failed_when: __verify_raft_peers_cmd['rc'] != 0
+      failed_when: >-
+        not (__verify_raft_peers_cmd['rc'] == 0 and
+        (__verify_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] | length == 3)
       retries: 12
       delay: 10
       until: >-
+        __verify_raft_peers_cmd['rc'] == 0 and
         (__verify_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] | length == 3
       no_log: true
 
