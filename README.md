@@ -216,6 +216,12 @@ The role gathers network facts for peers outside the current batch, so
 `serial`/`--limit` only for day-2 changes on an existing cluster, never for the
 first bootstrap: the cluster has to be initialized and joined in one full run.
 
+A `vault_version` change (package or binary install) also notifies the restart
+handler, so the new version runs right away and the role re-unseals the node in
+the same run. For an HA upgrade, follow the HashiCorp HA upgrade order: run the
+play with `serial: 1`, standby nodes first and the active node last, so only one
+node is down and sealed at a time.
+
 ---
 
 ## Tests (Molecule)

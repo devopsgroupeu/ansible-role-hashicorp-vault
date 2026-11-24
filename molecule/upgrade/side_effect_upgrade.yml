@@ -1,0 +1,35 @@
+---
+# Side effect: converge again with the target vault_version. The package
+# change must restart Vault onto the new binary and the role must re-unseal it.
+
+- name: Upgrade Vault to the target version
+  hosts: localhost
+  gather_facts: false
+  vars:
+    __upgrade_target_version: "2.2.2"
+  tasks:
+    - name: Run converge.yml with the target version
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+        MOLECULE_VAULT_UPGRADE_VERSION: "{{ __upgrade_target_version }}"
+      register: __upgrade_run
+      changed_when: false
+      failed_when: false
+
+    - name: Show the upgrade run play recap
+      ansible.builtin.debug:
+        msg: "{{ __upgrade_run['stdout_lines'] | select('search', 'ok=') | list }}"
+
+    - name: Assert the upgrade run passed and restarted Vault
+      ansible.builtin.assert:
+        that:
+          - __upgrade_run['rc'] == 0
+          - __upgrade_run['stdout'] is search('RUNNING HANDLER .*Restart HashiCorp Vault')
+        fail_msg: "Upgrade run failed or did not restart Vault: {{ __upgrade_run['stdout_lines'][-20:] }}"

@@ -94,6 +94,9 @@ jobs:
           # tls-disabled scenario - init, unseal and audit over http
           - scenario: tls-disabled
             distro: debian12
+          # upgrade scenario - package version change restarts and re-unseals
+          - scenario: upgrade
+            distro: debian12
     steps:
       - name: Checkout
         uses: actions/checkout@v7

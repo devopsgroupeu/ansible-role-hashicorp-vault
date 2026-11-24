@@ -59,6 +59,11 @@
     update_cache: true
     allow_downgrade: true
   when: ansible_facts['os_family'] == 'Debian'
+  # A version change replaces the binary on disk only; restart so the new
+  # version actually runs (init_unseal.yml re-unseals it in the same run).
+  notify:
+    - reload systemd daemon
+    - restart vault
 
 # --- RHEL / EL ----------------------------------------------------------------
 
@@ -88,3 +93,7 @@
     state: present
     allow_downgrade: true
   when: ansible_facts['os_family'] == 'RedHat'
+  # See the Debian task above: restart so the new version actually runs.
+  notify:
+    - reload systemd daemon
+    - restart vault
