@@ -11,7 +11,8 @@
 # changed=0 on all nodes), a --limit vault2 re-run (side_effect_limit.yml, must
 # not rewrite retry_join or SANs) and verify. Run manually with:
 #   molecule test -s raft-ha
-# or via GitHub Actions workflow_dispatch (see .github/workflows/ci.yml).
+# CI runs it on pull requests to main and via workflow_dispatch (see
+# .github/workflows/ci.yml).
 
 dependency:
   name: galaxy
