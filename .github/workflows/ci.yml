@@ -54,6 +54,10 @@ jobs:
         run: yamllint .
       - name: ansible-lint
         run: ansible-lint --profile production .
+      - name: No injected fact variables
+        # Injected top-level facts switch off by default in ansible-core 2.24;
+        # read them from ansible_facts instead.
+        run: "! grep -rnE 'ansible_(architecture|default_ipv4)' tasks defaults templates meta"
 
   molecule:
     name: molecule / ${{ matrix.scenario }} / ${{ matrix.distro }}${{ matrix.ansible-core && format(' / ansible-core {0}', matrix.ansible-core) || '' }}

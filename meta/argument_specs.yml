@@ -78,7 +78,7 @@ argument_specs:
       vault_arch:
         type: str
         required: false
-        default: "{{ {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(ansible_architecture, '') }}"
+        default: "{{ {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(ansible_facts['architecture'], '') }}"
         description: >
           CPU architecture string used in repo and binary download paths.
           amd64/arm64 only; other architectures are rejected by validate.yml.
@@ -142,13 +142,13 @@ argument_specs:
       vault_api_addr:
         type: str
         required: false
-        default: "https://{{ ansible_default_ipv4.address }}:8200"
+        default: "https://{{ ansible_facts['default_ipv4']['address'] }}:8200"
         description: Advertised API address (https; used by clients and retry_join).
 
       vault_cluster_addr:
         type: str
         required: false
-        default: "https://{{ ansible_default_ipv4.address }}:8201"
+        default: "https://{{ ansible_facts['default_ipv4']['address'] }}:8201"
         description: Advertised cluster address (https; used for Raft replication).
 
       vault_ui:

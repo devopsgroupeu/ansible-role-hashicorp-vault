@@ -28,10 +28,10 @@
       {%- for peer in vault_raft_peers -%}
         {%- set _ = sans.append('DNS:' ~ peer) -%}
         {%- if hostvars[peer] is defined
-               and 'ansible_default_ipv4' in hostvars[peer]
-               and hostvars[peer]['ansible_default_ipv4'] is mapping
-               and 'address' in hostvars[peer]['ansible_default_ipv4'] -%}
-          {%- set _ = sans.append('IP:' ~ hostvars[peer]['ansible_default_ipv4']['address']) -%}
+               and 'default_ipv4' in hostvars[peer]['ansible_facts'] | default({})
+               and hostvars[peer]['ansible_facts']['default_ipv4'] is mapping
+               and 'address' in hostvars[peer]['ansible_facts']['default_ipv4'] -%}
+          {%- set _ = sans.append('IP:' ~ hostvars[peer]['ansible_facts']['default_ipv4']['address']) -%}
         {%- endif -%}
       {%- endfor -%}
       {%- for extra in vault_tls_extra_sans -%}

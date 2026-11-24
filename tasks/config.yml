@@ -23,7 +23,7 @@
 
 # Build __vault_retry_join_peers: list of {addr: <ip|hostname>} for every peer
 # except the current host. Falls back to the peer inventory name when
-# ansible_default_ipv4.address is not yet gathered (e.g. render-only mode).
+# ansible_facts['default_ipv4']['address'] is not yet gathered (e.g. render-only mode).
 - name: Compute __vault_retry_join_peers (peers minus self, address-resolved)
   ansible.builtin.set_fact:
     __vault_retry_join_peers: >-
@@ -31,10 +31,10 @@
       {%- for peer in vault_raft_peers -%}
         {%- if peer != inventory_hostname -%}
           {%- if hostvars[peer] is defined
-                 and 'ansible_default_ipv4' in hostvars[peer]
-                 and hostvars[peer]['ansible_default_ipv4'] is mapping
-                 and 'address' in hostvars[peer]['ansible_default_ipv4'] -%}
-            {%- set addr = hostvars[peer]['ansible_default_ipv4']['address'] -%}
+                 and 'default_ipv4' in hostvars[peer]['ansible_facts'] | default({})
+                 and hostvars[peer]['ansible_facts']['default_ipv4'] is mapping
+                 and 'address' in hostvars[peer]['ansible_facts']['default_ipv4'] -%}
+            {%- set addr = hostvars[peer]['ansible_facts']['default_ipv4']['address'] -%}
           {%- else -%}
             {%- set addr = peer -%}
           {%- endif -%}

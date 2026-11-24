@@ -61,7 +61,7 @@
         vault_init_encrypt_password_file: "~/.vault-pass"
 
         # ---- Addressing ---------------------------------------------------------
-        # api_addr and cluster_addr are templated from ansible_default_ipv4.address
+        # api_addr and cluster_addr are templated from ansible_facts['default_ipv4']['address']
         # by default; override per-host in host_vars or group_vars if needed.
 
         # ---- Hardening ----------------------------------------------------------

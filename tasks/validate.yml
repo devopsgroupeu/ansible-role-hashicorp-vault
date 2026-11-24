@@ -18,7 +18,7 @@
     that:
       - vault_arch in ['amd64', 'arm64']
     fail_msg: >-
-      Unsupported architecture '{{ ansible_architecture }}' (resolved
+      Unsupported architecture '{{ ansible_facts['architecture'] }}' (resolved
       vault_arch='{{ vault_arch }}'). This role supports amd64 and arm64 only.
       Override vault_arch explicitly if your platform uses a different value.
     quiet: true

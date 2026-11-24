@@ -23,6 +23,9 @@ provisioner:
     side_effect: side_effect_check_mode.yml
   env:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
+    # Run without top-level fact variables (the ansible-core 2.24 default) to
+    # prove the role only reads ansible_facts.
+    ANSIBLE_INJECT_FACT_VARS: "False"
   config_options:
     defaults:
       interpreter_python: auto_silent

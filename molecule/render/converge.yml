@@ -33,7 +33,7 @@
     vault_telemetry_enabled: true
     vault_telemetry_unauthenticated_metrics_access: false
 
-    # Use deterministic api_addr / cluster_addr (no ansible_default_ipv4 dependency)
+    # Use deterministic api_addr / cluster_addr (no default_ipv4 fact dependency)
     vault_api_addr: "https://127.0.0.1:8200"
     vault_cluster_addr: "https://127.0.0.1:8201"
 

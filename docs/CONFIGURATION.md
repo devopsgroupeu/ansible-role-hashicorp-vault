@@ -37,7 +37,7 @@ is prefixed `vault_`.
 | `vault_binary_base_url` | `"https://releases.hashicorp.com/vault"` | Root URL for binary zip downloads (binary install method). |
 | `vault_binary_gpg_key_url` | `"https://www.hashicorp.com/.well-known/pgp-key.txt"` | HashiCorp PGP key URL for verifying `SHA256SUMS.sig` (binary method). |
 | `vault_binary_verify_gpg` | `true` | GPG-verify `SHA256SUMS.sig` before extracting. Set `false` only in air-gapped envs where you have already verified the checksum offline. |
-| `vault_arch` | `"amd64"` / `"arm64"` | CPU architecture string for repo and binary paths. Auto-detected from `ansible_architecture`. |
+| `vault_arch` | `"amd64"` / `"arm64"` | CPU architecture string for repo and binary paths. Auto-detected from `ansible_facts['architecture']`. |
 
 ---
 
@@ -61,8 +61,8 @@ is prefixed `vault_`.
 |---|---|---|
 | `vault_listen_address` | `"0.0.0.0:8200"` | API listener bind address and port. |
 | `vault_cluster_listen_address` | `"0.0.0.0:8201"` | Raft cluster listener bind address and port (Vault-internal mTLS). |
-| `vault_api_addr` | `"https://{{ ansible_default_ipv4.address }}:8200"` | Advertised API address. Must use `https://` scheme; override per-node via `host_vars` in multi-node deployments. |
-| `vault_cluster_addr` | `"https://{{ ansible_default_ipv4.address }}:8201"` | Advertised cluster address for Raft replication. Must use `https://` scheme. |
+| `vault_api_addr` | `"https://{{ ansible_facts['default_ipv4']['address'] }}:8200"` | Advertised API address. Must use `https://` scheme; override per-node via `host_vars` in multi-node deployments. |
+| `vault_cluster_addr` | `"https://{{ ansible_facts['default_ipv4']['address'] }}:8201"` | Advertised cluster address for Raft replication. Must use `https://` scheme. |
 | `vault_ui` | `true` | Enable the Vault web UI. |
 | `vault_cluster_name` | `""` | Human-readable cluster label in `vault.hcl`. Empty = omit (Vault auto-generates). |
 

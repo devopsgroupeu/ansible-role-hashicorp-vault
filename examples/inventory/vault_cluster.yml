@@ -6,7 +6,7 @@
 #
 # Set vault_api_addr and vault_cluster_addr per-host (host_vars or inline)
 # so each node advertises its own IP/hostname to the cluster.
-# Default: https://{{ ansible_default_ipv4.address }}:8200 / :8201
+# Default: https://{{ ansible_facts['default_ipv4']['address'] }}:8200 / :8201
 #
 # Usage:
 #   ansible-playbook -i examples/inventory/vault_cluster.yml site.yml

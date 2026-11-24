@@ -156,7 +156,7 @@ openssl x509 -in /opt/vault/tls/vault-cert.pem -noout -ext subjectAltName
 regenerate your BYO cert with the correct SANs. For `retry_join` you need:
 - `DNS:{{ vault_tls_leader_servername }}` (e.g. `vault.cluster.internal`)
 - `DNS:{{ inventory_hostname }}` for each node
-- `IP:{{ ansible_default_ipv4.address }}` for each node
+- `IP:{{ ansible_facts['default_ipv4']['address'] }}` for each node
 - `IP:127.0.0.1`
 
 ### `x509: certificate specifies an incompatible key usage`
