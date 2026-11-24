@@ -3,7 +3,7 @@ argument_specs:
   main:
     short_description: Install and configure HashiCorp Vault as a TLS-enabled Raft HA cluster
     description: >
-      Installs HashiCorp Vault (OSS) via package or GPG-verified binary,
+      Installs HashiCorp Vault Community Edition (BUSL 1.1) via package or GPG-verified binary,
       renders a validated vault.hcl (Raft integrated storage, TLS on by default),
       manages idempotent init and unseal (Shamir or auto-unseal), hardens the
       systemd unit, and optionally enables a file audit device.

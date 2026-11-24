@@ -10,7 +10,8 @@
 [![LinkedIn](https://img.shields.io/badge/linkedin-%230077B5.svg?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/company/devopsgroup8/)
 ![HashiCorp Vault](https://img.shields.io/badge/HashiCorp%20Vault-FFEC6E?logo=vault&logoColor=000&style=for-the-badge)
 
-Production-ready Ansible role for installing and configuring **HashiCorp Vault** (OSS)
+Production-ready Ansible role for installing and configuring **HashiCorp Vault**
+Community Edition (BUSL 1.1)
 as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 (Shamir + auto-unseal), systemd hardening, audit devices, and Prometheus telemetry.
 
@@ -44,7 +45,7 @@ Or pin a version from Git:
 roles:
   - name: devopsgroupeu.hashicorp-vault
     src: https://github.com/devopsgroupeu/ansible-role-hashicorp-vault.git
-    version: "v1.0.0"
+    version: "vX.Y.Z"   # latest release tag, see GitHub Releases
     scm: git
 ```
 
@@ -263,13 +264,24 @@ molecule test -s render
 # Full single-node install + init + unseal + audit
 molecule test -s default
 
-# Three-node Raft HA cluster (heavy — run manually)
+# Failure paths and fail-closed guards (init file, encryption, PGP, wait gates)
+molecule test -s negative
+
+# Binary install, TLS disabled, package upgrade
+molecule test -s binary
+molecule test -s tls-disabled
+molecule test -s upgrade
+
+# Three-node Raft HA cluster (heavy - run manually)
 molecule test -s raft-ha
 ```
 
-The CI pipeline (`ci.yml`) runs `render` and `default` on `debian12`, `ubuntu2404`,
-and `rockylinux9` on every push/PR. The `raft-ha` scenario is manual
-(workflow_dispatch) due to resource requirements.
+The CI pipeline (`ci.yml`) runs on every push/PR: lint on ansible-core 2.20,
+2.21 and 2.22, `render` on `debian12` and `ubuntu2404` (plus ansible-core 2.20
+and 2.22 legs on `debian12`), `default` and `binary` on `debian12` and
+`ubuntu2404`, and `negative`, `tls-disabled` and `upgrade` on `debian12`. The
+`raft-ha` scenario is manual (workflow_dispatch) due to resource requirements.
+EL9 is a supported platform but is not tested in CI.
 
 ---
 
@@ -297,7 +309,7 @@ ansible-role-hashicorp-vault/
 │   ├── vault.hcl.j2
 │   ├── vault.env.j2
 │   └── vault.service.j2
-├── molecule/{default,render,raft-ha}/
+├── molecule/{default,render,raft-ha,negative,binary,tls-disabled,upgrade}/
 ├── examples/{single_node.yml,raft_cluster.yml,autounseal_transit.yml}
 │   └── inventory/vault_cluster.yml
 ├── docs/{ARCHITECTURE.md,CONFIGURATION.md,INTEGRATION.md,TROUBLESHOOTING.md}

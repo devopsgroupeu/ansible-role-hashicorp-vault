@@ -58,6 +58,16 @@ jobs:
         # Injected top-level facts switch off by default in ansible-core 2.24;
         # read them from ansible_facts instead.
         run: "! grep -rnE 'ansible_(architecture|default_ipv4)' tasks defaults templates meta"
+      - name: Docs drift gates
+        # Keep the licence wording, install pins and the documented CI matrix
+        # in line with the code.
+        run: |
+          ! grep -rn '(OSS)' README.md docs meta
+          ! grep -rn 'feat/galaxy-readiness-v2' README.md docs
+          if grep -q rockylinux9 README.md && ! grep -q 'distro: rockylinux9' .github/workflows/ci.yml; then
+            echo "README.md mentions rockylinux9 but ci.yml does not run it"
+            exit 1
+          fi
 
   molecule:
     name: molecule / ${{ matrix.scenario }} / ${{ matrix.distro }}${{ matrix.ansible-core && format(' / ansible-core {0}', matrix.ansible-core) || '' }}

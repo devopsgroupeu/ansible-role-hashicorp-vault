@@ -27,7 +27,7 @@ collections:
 
 roles:
   - name: devopsgroupeu.hashicorp-vault
-    version: "1.0.0"
+    version: "X.Y.Z"   # latest release, see GitHub Releases
 ```
 
 Install:
@@ -44,7 +44,7 @@ ansible-galaxy role install -r requirements.yml
 roles:
   - name: devopsgroupeu.hashicorp-vault
     src: https://github.com/devopsgroupeu/ansible-role-hashicorp-vault.git
-    version: "feat/galaxy-readiness-v2"   # or a git tag: v1.0.0
+    version: "vX.Y.Z"   # a release tag (latest: see GitHub Releases) or a commit SHA
     scm: git
 ```
 
@@ -155,9 +155,10 @@ spec:
 
 After the role completes successfully:
 
-1. **Recover the init file** from the Ansible controller:
+1. **Recover the init file** from the Ansible controller
+   (`vault_init_output_path`, default `~/.vault/.vault_init_<cluster_id>.json`):
    ```bash
-   ansible-vault view .vault_init_<cluster_id>.json --vault-password-file ~/.vault-pass
+   ansible-vault view ~/.vault/.vault_init_<cluster_id>.json --vault-password-file ~/.vault-pass
    ```
 
 2. **Store unseal/recovery keys** in a secure location (hardware token, sealed
@@ -169,6 +170,10 @@ After the role completes successfully:
    ```bash
    vault token revoke <root_token>
    ```
+   Later role runs need a token for Raft formation verify and audit device
+   setup. Once the root token is revoked, pass `vault_admin_token` (from
+   ansible-vault or another secret store); without a valid token the role skips
+   those steps with a warning.
 
 4. **Configure auth methods and secrets engines** appropriate for your workload
    (Kubernetes auth, PKI secrets engine, KV v2, etc.).

@@ -222,12 +222,14 @@ or seal secrets run with `no_log: true`.
 
 ## Audit
 
-The role enables a file audit device after Vault is initialized. Requires the root
-token from the init output (`vault_init_output_path`).
+The role enables a file audit device after Vault is initialized and unsealed. It
+needs a valid token: `vault_admin_token` when set, otherwise the root token from
+the init output (`vault_init_output_path`). Without a valid token the audit
+device setup is skipped with a warning.
 
 | Variable | Default | Description |
 |---|---|---|
-| `vault_audit_enabled` | `true` | Enable a file audit device after Vault is initialized. Gated on `vault_init: true`. |
+| `vault_audit_enabled` | `true` | Enable a file audit device after Vault is initialized. Runs on every run (not only with `vault_init: true`) whenever a valid token is available. |
 | `vault_audit_path` | `"file/"` | Vault audit device mount path (used with `vault audit enable -path=…`). |
 | `vault_audit_file_path` | `"{{ vault_audit_dir }}/vault_audit.log"` | Audit log file path on the target host. |
 | `vault_audit_options` | `{}` | Extra options passed to `vault audit enable` as `key=value` pairs. |

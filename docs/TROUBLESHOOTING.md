@@ -33,7 +33,8 @@ but they only run during the Ansible play. After an OS reboot the node starts se
 
 ```bash
 # Retrieve unseal key from the init file on the controller
-ansible-vault view .vault_init_<cluster_id>.json --vault-password-file ~/.vault-pass
+# (vault_init_output_path, default ~/.vault/.vault_init_<cluster_id>.json)
+ansible-vault view ~/.vault/.vault_init_<cluster_id>.json --vault-password-file ~/.vault-pass
 
 # On the sealed node (run for each required share until threshold is met)
 export VAULT_ADDR=https://127.0.0.1:8200
