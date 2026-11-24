@@ -53,6 +53,7 @@ scenario:
     - converge
     - idempotence
     - side_effect side_effect_check_mode.yml
+    - side_effect side_effect_cert_renewal.yml
     - verify
     - side_effect side_effect_revoked_token.yml
     - cleanup

@@ -250,7 +250,18 @@ argument_specs:
         type: str
         required: false
         default: "+825d"
-        description: Certificate validity period (ownca not_after format).
+        description: >
+          Validity of role-generated node certificates (ownca not_after
+          format). They are re-signed when they expire within 30 days.
+
+      vault_tls_ca_validity:
+        type: str
+        required: false
+        default: "+3650d"
+        description: >
+          Validity of the role-generated CA (selfsigned not_after format). The
+          CA is renewed (same key) when it expires within 90 days, and the node
+          certificates are re-signed in the same run.
 
       vault_tls_leader_servername:
         type: str

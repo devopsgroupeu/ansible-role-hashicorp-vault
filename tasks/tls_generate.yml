@@ -89,6 +89,20 @@
   when: inventory_hostname == vault_init_bootstrap_node
   tags: tls
 
+# x509_certificate ignores timestamps when deciding whether to regenerate, so
+# an expiring CA would never be renewed on its own. Check it explicitly and
+# force a new CA certificate (same key) when it expires within 90 days.
+- name: Check existing CA certificate validity on bootstrap node
+  community.crypto.x509_certificate_info:
+    path: "{{ vault_tls_ca_file }}"
+    valid_at:
+      check: "+90d"
+  register: __vault_existing_ca
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname == vault_init_bootstrap_node
+  tags: tls
+
 - name: Generate CA certificate (self-signed) on bootstrap node
   community.crypto.x509_certificate:
     path: "{{ vault_tls_ca_file }}"
@@ -96,10 +110,12 @@
     privatekey_path: "{{ vault_tls_dir }}/vault-ca-key.pem"
     provider: selfsigned
     selfsigned_not_before: "-1d"
-    selfsigned_not_after: "{{ vault_tls_cert_validity }}"
+    selfsigned_not_after: "{{ vault_tls_ca_validity }}"
+    force: "{{ not (__vault_existing_ca.get('valid_at', {}).get('check', false) | bool) }}"
     owner: root
     group: root
     mode: "{{ vault_tls_cert_mode }}"
+  register: __vault_ca_cert_result
   when: inventory_hostname == vault_init_bootstrap_node
   tags: tls
 
@@ -134,6 +150,7 @@
     owner: root
     group: root
     mode: "{{ vault_tls_cert_mode }}"
+  register: __vault_ca_cert_copy
   when: inventory_hostname != vault_init_bootstrap_node
   tags: tls
 
@@ -193,7 +210,9 @@
 
 # --- Idempotency check --------------------------------------------------------
 # Inspect the existing node cert (if any) so we can skip signing when the cert
-# is still valid and already carries all required SANs.
+# is still valid for 30 more days, already carries all required SANs and the
+# CA did not change in this run. x509_certificate ignores timestamps and does
+# not notice a renewed CA with the same key, so these checks force re-signing.
 
 - name: Check existing node certificate info
   community.crypto.x509_certificate_info:
@@ -211,11 +230,13 @@
       {{
         __vault_existing_cert['failed'] | default(true)
         or not __vault_existing_cert.get('valid_at', {}).get('check', false)
+        or __vault_ca_cert_result is changed
+        or __vault_ca_cert_copy is changed
         or (
-          __vault_tls_sans | map('regex_replace', '^(DNS|IP):', '') | list
+          __vault_tls_sans | map('regex_replace', '^(DNS|IP|IP Address):', '') | list
           | difference(
               ((__vault_existing_cert.get('subject_alt_name', []) | default([]))
-               | map('regex_replace', '^(DNS:|IP Address:)', '') | list)
+               | map('regex_replace', '^(DNS|IP|IP Address):', '') | list)
             )
           | length > 0
         )
@@ -233,6 +254,7 @@
     provider: ownca
     ownca_not_before: "-1d"
     ownca_not_after: "{{ vault_tls_cert_validity }}"
+    force: "{{ __vault_regen_cert | bool }}"
     owner: root
     group: root
     mode: "{{ vault_tls_cert_mode }}"

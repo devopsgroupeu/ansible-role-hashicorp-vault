@@ -1,0 +1,176 @@
+---
+# Side effect: renewal of role-generated certificates.
+#   A. A renewed CA (same key, new certificate) re-signs the node certificate
+#      in the same run, and Vault keeps answering with the new CA.
+#   B. A node certificate that expires within 30 days is re-signed on the next
+#      run (not_after moves forward) and Vault is reloaded.
+#   C. A run with the default validity restores a long-lived certificate, so
+#      later steps see a stable node.
+
+- name: A - record certificates and drop the CA certificate
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read the CA certificate before renewal
+      community.crypto.x509_certificate_info:
+        path: /opt/vault/tls/vault-ca.pem
+      register: __renew_ca_before
+
+    - name: Read the node certificate before renewal
+      community.crypto.x509_certificate_info:
+        path: /opt/vault/tls/vault-cert.pem
+      register: __renew_node_before
+
+    - name: Remove the CA certificate (the CA key stays)
+      ansible.builtin.file:
+        path: /opt/vault/tls/vault-ca.pem
+        state: absent
+
+- name: A - converge with a missing CA certificate
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __renew_ca_run
+      changed_when: false
+      failed_when: __renew_ca_run['rc'] != 0
+
+- name: A - assert the CA was renewed and the node certificate re-signed
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read the CA certificate after renewal
+      community.crypto.x509_certificate_info:
+        path: /opt/vault/tls/vault-ca.pem
+      register: __renew_ca_after
+
+    - name: Read the node certificate after renewal
+      community.crypto.x509_certificate_info:
+        path: /opt/vault/tls/vault-cert.pem
+      register: __renew_node_after
+
+    - name: Query Vault status with the renewed CA
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __renew_status
+      changed_when: false
+      failed_when: __renew_status['rc'] != 0
+
+    - name: Assert a new CA certificate signed a new node certificate
+      ansible.builtin.assert:
+        that:
+          - __renew_ca_after['serial_number'] != __renew_ca_before['serial_number']
+          - __renew_ca_after['public_key_fingerprints'] == __renew_ca_before['public_key_fingerprints']
+          - __renew_node_after['serial_number'] != __renew_node_before['serial_number']
+        fail_msg: "The CA was not renewed, or the node certificate was not re-signed with it"
+
+    - name: Remove the node certificate before the short-validity runs
+      ansible.builtin.file:
+        path: /opt/vault/tls/vault-cert.pem
+        state: absent
+
+- name: B - converge twice with a 20 day node certificate
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml with vault_tls_cert_validity +20d (issue)
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+          - --extra-vars
+          - '{"vault_tls_cert_validity": "+20d"}'
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __renew_short_run1
+      changed_when: false
+      failed_when: __renew_short_run1['rc'] != 0
+
+    - name: Read the short-lived node certificate
+      community.crypto.x509_certificate_info:
+        path: /opt/vault/tls/vault-cert.pem
+      delegate_to: "{{ groups['all'][0] }}"
+      become: true
+      register: __renew_short1
+
+    - name: Run converge.yml with vault_tls_cert_validity +20d (renew)
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+          - --extra-vars
+          - '{"vault_tls_cert_validity": "+20d"}'
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __renew_short_run2
+      changed_when: false
+      failed_when: __renew_short_run2['rc'] != 0
+
+    - name: Read the renewed node certificate
+      community.crypto.x509_certificate_info:
+        path: /opt/vault/tls/vault-cert.pem
+      delegate_to: "{{ groups['all'][0] }}"
+      become: true
+      register: __renew_short2
+
+    - name: Assert the certificate was renewed and Vault reloaded
+      ansible.builtin.assert:
+        that:
+          - __renew_short2['not_after'] > __renew_short1['not_after']
+          - __renew_short2['serial_number'] != __renew_short1['serial_number']
+          - __renew_short_run2['stdout'] is search('RUNNING HANDLER .*Reload HashiCorp Vault')
+        fail_msg: >-
+          The 20 day certificate was not renewed ({{ __renew_short1['not_after'] }}
+          -> {{ __renew_short2['not_after'] }}) or the reload handler did not run.
+
+- name: C - restore a long-lived node certificate
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml with the default validity
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __renew_restore_run
+      changed_when: false
+      failed_when: __renew_restore_run['rc'] != 0
+
+    - name: Read the restored node certificate
+      community.crypto.x509_certificate_info:
+        path: /opt/vault/tls/vault-cert.pem
+        valid_at:
+          check: "+800d"
+      delegate_to: "{{ groups['all'][0] }}"
+      become: true
+      register: __renew_restored
+
+    - name: Assert the restored certificate is long-lived
+      ansible.builtin.assert:
+        that:
+          - __renew_restored['valid_at']['check'] | bool
+        fail_msg: "The default-validity run did not issue an 825 day certificate"

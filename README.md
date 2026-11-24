@@ -114,7 +114,7 @@ See `examples/` for all complete playbooks.
 
 ## Role variables
 
-All 108 variables are documented in full in **[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
+All 109 variables are documented in full in **[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
 Every variable is prefixed `vault_`, declared in `defaults/main.yml`, and validated
 by `meta/argument_specs.yml` (1:1 mapping).
 
@@ -244,10 +244,10 @@ and `rockylinux9` on every push/PR. The `raft-ha` scenario is manual
 
 ```
 ansible-role-hashicorp-vault/
-├── defaults/main.yml              # 108 public variables
+├── defaults/main.yml              # 109 public variables
 ├── vars/main.yml                  # OS-family maps (internal)
 ├── meta/main.yml                  # Galaxy metadata
-├── meta/argument_specs.yml        # 1:1 with defaults (108 entries)
+├── meta/argument_specs.yml        # 1:1 with defaults (109 entries)
 ├── tasks/
 │   ├── main.yml                   # orchestrator
 │   ├── validate.yml               # cross-var assertions

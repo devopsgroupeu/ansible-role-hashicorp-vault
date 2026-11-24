@@ -140,6 +140,12 @@ vault_tls_cert_size: 4096
 # Note: 825 days is only a hard limit on Apple platforms; adjust as needed.
 vault_tls_cert_validity: "+825d"
 
+# Validity of the role-generated CA (selfsigned not_after syntax). The role
+# renews the CA (same key) when it expires within 90 days and re-signs the node
+# certificates in the same run. Node certificates are re-signed when they
+# expire within 30 days.
+vault_tls_ca_validity: "+3650d"
+
 # Shared DNS SAN that must appear on every node's certificate and matches
 # the leader_tls_servername in retry_join blocks. Must be a DNS SAN (CN
 # matching was removed in Go 1.17).

@@ -94,7 +94,8 @@ TLS is **on by default** (`vault_tls_enabled: true`). Two modes:
 | `vault_tls_cert_key_type` | `"ECC"` | Key type for role-generated certificates. Choices: `ECC` (P-384, default), `RSA`. |
 | `vault_tls_cert_curve` | `"secp384r1"` | ECC curve for generated certificates (when `vault_tls_cert_key_type=ECC`). |
 | `vault_tls_cert_size` | `4096` | RSA key size for generated certificates (when `vault_tls_cert_key_type=RSA`). |
-| `vault_tls_cert_validity` | `"+825d"` | Certificate validity period (`ownca not_after` format). Note: 825 days is a hard limit only on Apple platforms; other platforms accept longer periods. |
+| `vault_tls_cert_validity` | `"+825d"` | Validity of role-generated node certificates (`ownca not_after` format). They are re-signed when they expire within 30 days. Note: 825 days is a hard limit only on Apple platforms; other platforms accept longer periods. |
+| `vault_tls_ca_validity` | `"+3650d"` | Validity of the role-generated CA (`selfsigned not_after` format). The CA is renewed with the same key when it expires within 90 days, and the node certificates are re-signed in the same run. |
 | `vault_tls_leader_servername` | `"vault.cluster.internal"` | Shared DNS SAN that must appear on every node's cert and must match `leader_tls_servername` in `retry_join` blocks. Does not need to resolve in DNS. |
 | `vault_tls_extra_sans` | `[]` | Additional `DNS:` or `IP:` SANs for role-generated certificates. Example: `["DNS:vault.example.com", "IP:10.0.0.1"]`. |
 | `vault_tls_install_ca_to_trust_store` | `true` | Install the CA (`vault_tls_ca_file`) into the OS trust store (APT: `/usr/local/share/ca-certificates/`; RHEL: `/etc/pki/ca-trust/source/anchors/`). Ignored when `vault_tls_enabled` is false. |
