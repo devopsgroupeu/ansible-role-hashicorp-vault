@@ -525,6 +525,17 @@ argument_specs:
         default: "{{ vault_raft_peers[0] }}"
         description: Stable cluster identifier used in the init output filename.
 
+      vault_admin_token:
+        type: str
+        required: false
+        default: ""
+        no_log: true
+        description: >
+          Optional Vault token for Raft formation verify and audit device
+          setup. Takes precedence over the saved root token, so day-2 runs keep
+          working after the root token is revoked. Empty = use the saved root
+          token; without a valid token these steps are skipped with a warning.
+
       # ---- Telemetry / logging / TTLs / hardening ----
       vault_telemetry_enabled:
         type: bool

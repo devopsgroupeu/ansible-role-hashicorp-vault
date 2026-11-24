@@ -2,7 +2,8 @@
 # ==============================================================================
 # Enable Vault file audit device idempotently.
 # Only included when vault_config_only=false and vault_audit_enabled=true
-# (gated in main.yml). Requires a root token from init_unseal.yml.
+# (gated in main.yml). Requires a valid token (vault_admin_token or the root
+# token) resolved and probed in init_unseal.yml.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -35,22 +36,25 @@
   environment:
     VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+    VAULT_TOKEN: "{{ __vault_api_token | default('') }}"
   register: __vault_audit_list_cmd
   check_mode: false
   changed_when: false
-  failed_when: __vault_audit_list_cmd['rc'] not in [0, 2]
+  # Only "no devices" may pass as an empty list; any other error (for example
+  # permission denied, also rc=2) must fail here instead of reading as empty.
+  failed_when: >-
+    __vault_audit_list_cmd['rc'] != 0
+    and 'no audit devices' not in (__vault_audit_list_cmd['stdout'] ~ __vault_audit_list_cmd['stderr']) | lower
   no_log: true
   run_once: true
   delegate_to: "{{ vault_init_bootstrap_node }}"
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
     - not (__vault_left_sealed | default(false) | bool)
   tags: audit
 
-# rc=2 from 'vault audit list' means no devices enabled yet (empty list).
-# Parse JSON only when rc=0 and stdout is non-empty.
+# 'vault audit list' may report "no audit devices" (empty list). Parse JSON
+# only when rc=0 and stdout is non-empty.
 - name: Parse enabled audit devices
   ansible.builtin.set_fact:
     __vault_audit_devices: >-
@@ -80,7 +84,7 @@
   environment:
     VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+    VAULT_TOKEN: "{{ __vault_api_token | default('') }}"
   register: __vault_audit_enable_cmd
   changed_when: __vault_audit_enable_cmd['rc'] == 0
   failed_when: __vault_audit_enable_cmd['rc'] != 0
@@ -88,8 +92,7 @@
   run_once: true
   delegate_to: "{{ vault_init_bootstrap_node }}"
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
     - not (__vault_left_sealed | default(false) | bool)
     - __vault_audit_devices is defined
     - vault_audit_path not in (__vault_audit_devices | default({}))

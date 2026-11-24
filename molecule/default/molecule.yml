@@ -54,5 +54,6 @@ scenario:
     - idempotence
     - side_effect side_effect_check_mode.yml
     - verify
+    - side_effect side_effect_revoked_token.yml
     - cleanup
     - destroy

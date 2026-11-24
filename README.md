@@ -114,7 +114,7 @@ See `examples/` for all complete playbooks.
 
 ## Role variables
 
-All 107 variables are documented in full in **[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
+All 108 variables are documented in full in **[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
 Every variable is prefixed `vault_`, declared in `defaults/main.yml`, and validated
 by `meta/argument_specs.yml` (1:1 mapping).
 
@@ -132,6 +132,7 @@ Key variables to be aware of:
 | `vault_init_bootstrap_node` | `vault_raft_peers[0]` | Node where `vault operator init` runs |
 | `vault_init_output_path` | `~/.vault/.vault_init_…json` | Controller-side (outside the repo), mode `0600`; optionally encrypted |
 | `vault_init_encrypt_output` | `true` | Encrypt init JSON with `ansible-vault` |
+| `vault_admin_token` | `""` | Optional token for Raft verify and audit setup after the root token is revoked |
 | `vault_disable_mlock` | `true` | Required for Raft/BoltDB mmap |
 | `vault_manage_swap` | `true` | `swapoff -a` + purge fstab |
 | `vault_config_only` | `false` | `true` = template-only dry-run (skip install/service/init) |
@@ -243,10 +244,10 @@ and `rockylinux9` on every push/PR. The `raft-ha` scenario is manual
 
 ```
 ansible-role-hashicorp-vault/
-├── defaults/main.yml              # 107 public variables
+├── defaults/main.yml              # 108 public variables
 ├── vars/main.yml                  # OS-family maps (internal)
 ├── meta/main.yml                  # Galaxy metadata
-├── meta/argument_specs.yml        # 1:1 with defaults (107 entries)
+├── meta/argument_specs.yml        # 1:1 with defaults (108 entries)
 ├── tasks/
 │   ├── main.yml                   # orchestrator
 │   ├── validate.yml               # cross-var assertions

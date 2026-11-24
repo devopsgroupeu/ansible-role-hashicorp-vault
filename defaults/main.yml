@@ -288,6 +288,16 @@ vault_init_encrypt_password_file: ""
 # peer hostname; override to a human-readable cluster name if desired.
 vault_cluster_id: "{{ vault_raft_peers[0] }}"
 
+# Optional Vault token for the token-gated day-2 steps (Raft formation verify
+# and audit device setup). When set it takes precedence over the root token in
+# the saved init file, so the role keeps working after that root token has
+# been revoked (as production hardening recommends). The token needs read on
+# sys/storage/raft/configuration and sudo on sys/audit. Empty = use the saved
+# root token. When no valid token is available these steps are skipped with a
+# warning. Pass it from ansible-vault or another secret store, never in plain
+# text.
+vault_admin_token: ""
+
 # ==============================================================================
 # Telemetry / logging / TTLs / hardening
 # ==============================================================================

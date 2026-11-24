@@ -194,6 +194,7 @@ or seal secrets run with `no_log: true`.
 | `vault_init_output_path` | `"{{ '~/.vault' \| expanduser }}/.vault_init_{{ vault_cluster_id }}.json"` | Controller-side path where the init JSON is saved (mode `0600`). Defaults under the controller user's home, outside any playbook/repo directory. The role creates the parent dir (mode `0700`). Includes `vault_cluster_id` to prevent multi-cluster overwrites. |
 | `vault_init_encrypt_output` | `true` | Encrypt the saved init JSON with `ansible-vault encrypt` after writing. Strongly recommended. |
 | `vault_init_encrypt_password_file` | `""` | Path to a password file on the Ansible controller for `ansible-vault encrypt --vault-password-file`. Required when `vault_init_encrypt_output=true`: the role **fails before writing any init material** if encryption is requested without this file, instead of writing the root token and keys in plaintext. Set `vault_init_encrypt_output=false` to intentionally allow plaintext. |
+| `vault_admin_token` | `""` | Optional Vault token (no_log) for the token-gated day-2 steps: Raft formation verify and audit device setup. Takes precedence over the root token in the saved init file, so runs keep working after that root token is revoked. Needs read on `sys/storage/raft/configuration` and sudo on `sys/audit`. When no valid token is available these steps are skipped with a warning. |
 | `vault_cluster_id` | `"{{ vault_raft_peers[0] }}"` | Stable identifier used in the init output filename. Override to a human-readable name for multi-cluster playbooks. |
 
 ---

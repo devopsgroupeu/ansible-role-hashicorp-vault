@@ -1,0 +1,60 @@
+---
+# Side effect: revoke the saved root token (as production hardening advises),
+# then converge again. The run must finish quickly without failures or
+# changes and warn that the token-gated steps were skipped.
+
+- name: Revoke the saved root token
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read root token from controller init file
+      ansible.builtin.slurp:
+        src: /tmp/.vault_init_molecule_default.json
+      delegate_to: localhost
+      become: false
+      register: __revoke_init_file
+      no_log: true
+
+    - name: Revoke the root token
+      ansible.builtin.command: vault token revoke -self
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+        VAULT_TOKEN: "{{ (__revoke_init_file['content'] | b64decode | from_json)['root_token'] }}"
+      changed_when: true
+      no_log: true
+
+- name: Converge again with the revoked root token
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run converge.yml
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __revoked_run
+      changed_when: false
+      failed_when: false
+
+    - name: Show the play recap
+      ansible.builtin.debug:
+        msg: "{{ __revoked_run['stdout_lines'] | select('search', 'ok=') | list }}"
+
+    - name: Assert the run passed quickly, changed nothing and warned
+      ansible.builtin.assert:
+        that:
+          - __revoked_run['rc'] == 0
+          - __revoked_run['stdout'] is not search('changed=[1-9]')
+          - __revoked_run['stdout'] is not search('failed=[1-9]')
+          - __revoked_run['stdout'] is search('Skipped. Raft formation verify and audit device')
+          - >-
+            ((__revoked_run['end'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))
+            - (__revoked_run['start'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))).total_seconds() < 120
+        fail_msg: "Revoked-token run failed, changed something, did not warn or took 120 s or more: {{ __revoked_run['stdout_lines'][-20:] }}"

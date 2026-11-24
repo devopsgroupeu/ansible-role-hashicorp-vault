@@ -670,10 +670,70 @@
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
+# 7b. Resolve and probe the token for the token-gated steps (Raft verify and
+#     audit). vault_admin_token wins over the saved root token. A revoked or
+#     expired token (operators are told to revoke the root token) must not
+#     make every later run hang in retries and fail: probe it once and skip
+#     the token-gated steps with a warning when it is not valid.
+# ------------------------------------------------------------------------------
+
+- name: Resolve the token for token-gated steps
+  ansible.builtin.set_fact:
+    __vault_api_token: >-
+      {{ vault_admin_token if vault_admin_token | length > 0
+         else (__vault_root_token | default('')) }}
+  no_log: true
+  tags: init_unseal
+
+- name: Look up the token on the bootstrap node
+  ansible.builtin.command: >-
+    {{ vault_bin_path }} token lookup -format=json
+  environment:
+    VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+    VAULT_TOKEN: "{{ __vault_api_token }}"
+  delegate_to: "{{ vault_init_bootstrap_node }}"
+  run_once: true
+  register: __vault_token_lookup
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - __vault_api_token | length > 0
+    - not (__vault_left_sealed | default(false) | bool)
+  tags: init_unseal
+
+- name: Record whether the token is valid
+  ansible.builtin.set_fact:
+    __vault_token_valid: >-
+      {{ __vault_token_lookup is defined
+         and not (__vault_token_lookup['skipped'] | default(false) | bool)
+         and __vault_token_lookup['rc'] | default(1) == 0 }}
+  run_once: true
+  tags: init_unseal
+
+- name: Warn that token-gated steps are skipped
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: the Vault token for day-2 steps
+      ({{ 'vault_admin_token' if vault_admin_token | length > 0 else 'root token from ' ~ vault_init_output_path }})
+      is not valid (token lookup rc={{ __vault_token_lookup['rc'] | default('n/a') }};
+      revoked or expired?). Skipped: Raft formation verify and audit device
+      setup. Set vault_admin_token to a valid token to run them.
+  run_once: true
+  when:
+    - __vault_api_token | length > 0
+    - not (__vault_left_sealed | default(false) | bool)
+    - not (__vault_token_valid | bool)
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
 # 8. Raft formation verify (bootstrap node, run_once)
 #    Checks that peer count == vault_raft_peers | length and all are voters.
 #    Autopilot auto-promotes voters after ~10s; retry accordingly.
-#    Runs whenever a root token is resolvable (fresh init OR loaded from file).
+#    Runs whenever a valid token is resolvable (vault_admin_token, or the root
+#    token from a fresh init or the saved init file).
 #    no_log: true — VAULT_TOKEN in environment; task output is read-only
 #    (changed_when: false) so no secrets leak through change reporting.
 # ------------------------------------------------------------------------------
@@ -684,7 +744,7 @@
   environment:
     VAULT_ADDR: "{{ __vault_bootstrap_api_addr }}"
     VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+    VAULT_TOKEN: "{{ __vault_api_token }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_raft_peers_cmd
@@ -694,7 +754,10 @@
   # retries are exhausted without meeting the until condition. With failed_when:
   # false the task would silently report ok even with 1 peer, causing the assert
   # below to fail with confusing messaging.
+  # A permission error does not heal by waiting: stop retrying on it (the
+  # non-zero rc then fails the task).
   until: >-
+    'permission denied' in __vault_raft_peers_cmd['stderr'] | lower or
     __vault_raft_peers_cmd['rc'] == 0 and
     __vault_raft_peers_cmd['stdout'] | length > 0 and
     ((__vault_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] | length) == (vault_raft_peers | length) and
@@ -705,8 +768,7 @@
   delay: 10
   no_log: true
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
     - not (__vault_left_sealed | default(false) | bool)
   tags: init_unseal
 
@@ -723,8 +785,7 @@
     quiet: true
   run_once: true
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
     - not (__vault_left_sealed | default(false) | bool)
     - __vault_raft_peers_cmd is defined
   tags: init_unseal
