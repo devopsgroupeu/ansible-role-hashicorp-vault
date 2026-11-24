@@ -8,8 +8,11 @@
 # 1. Status probe — run on every node
 #    Vault 2.x exit codes: 0 = unsealed, 1 = error/unreachable, 2 = sealed.
 #    Both rc=0 and rc=2 produce valid JSON stdout; rc=1 produces no usable JSON.
-#    failed_when allows [0,1,2]; changed_when is always false.
-#    Parse JSON fields (.initialized / .sealed) — never branch on rc alone.
+#    rc=1 (connection, TLS or CA error, or a service that is still starting) is
+#    retried briefly and then fails with the CLI stderr visible: it must never
+#    be read as "not initialized", or init would run against a live cluster.
+#    vault status output carries no secrets, so these probes are not no_log.
+#    Parse JSON fields (.initialized / .sealed) - never branch on rc alone.
 # ------------------------------------------------------------------------------
 
 - name: Probe Vault status on every node
@@ -21,17 +24,18 @@
   register: __vault_status_cmd
   check_mode: false
   changed_when: false
-  failed_when: __vault_status_cmd['rc'] not in [0, 1, 2]
+  # failed_when mirrors until so exhausted retries fail the task.
+  until: >-
+    __vault_status_cmd['rc'] in [0, 2] and __vault_status_cmd['stdout'] | length > 0
+  failed_when: >-
+    not (__vault_status_cmd['rc'] in [0, 2] and __vault_status_cmd['stdout'] | length > 0)
+  retries: 6
+  delay: 5
   tags: init_unseal
 
 - name: Parse Vault status JSON
   ansible.builtin.set_fact:
-    __vault_status: >-
-      {%- if __vault_status_cmd['rc'] in [0, 2] and __vault_status_cmd['stdout'] | length > 0 -%}
-        {{ __vault_status_cmd['stdout'] | from_json }}
-      {%- else -%}
-        {{ {'initialized': false, 'sealed': true} }}
-      {%- endif -%}
+    __vault_status: "{{ __vault_status_cmd['stdout'] | from_json }}"
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -51,17 +55,18 @@
   register: __vault_bootstrap_status_cmd
   check_mode: false
   changed_when: false
-  failed_when: __vault_bootstrap_status_cmd['rc'] not in [0, 1, 2]
+  # Only rc 0/2 with JSON may drive the init decision (see section 1).
+  until: >-
+    __vault_bootstrap_status_cmd['rc'] in [0, 2] and __vault_bootstrap_status_cmd['stdout'] | length > 0
+  failed_when: >-
+    not (__vault_bootstrap_status_cmd['rc'] in [0, 2] and __vault_bootstrap_status_cmd['stdout'] | length > 0)
+  retries: 6
+  delay: 5
   tags: init_unseal
 
 - name: Parse bootstrap node Vault status JSON
   ansible.builtin.set_fact:
-    __vault_bootstrap_status: >-
-      {%- if __vault_bootstrap_status_cmd['rc'] in [0, 2] and __vault_bootstrap_status_cmd['stdout'] | length > 0 -%}
-        {{ __vault_bootstrap_status_cmd['stdout'] | from_json }}
-      {%- else -%}
-        {{ {'initialized': false, 'sealed': true} }}
-      {%- endif -%}
+    __vault_bootstrap_status: "{{ __vault_bootstrap_status_cmd['stdout'] | from_json }}"
   run_once: true
   tags: init_unseal
 

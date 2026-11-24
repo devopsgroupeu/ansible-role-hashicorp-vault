@@ -18,10 +18,65 @@
         name: ansible-role-hashicorp-vault
 
 # ------------------------------------------------------------------------------
-# Case 1 (V-06): vault_unseal=false on a fresh node finishes quickly and leaves
+# Case 1 (V-09): an unreachable Vault (service stopped) must fail the status
+# probe with the CLI error visible, and must never be read as "not
+# initialized" (which would run vault operator init).
+# ------------------------------------------------------------------------------
+- name: Case 1 - status probe errors fail instead of reading as uninitialized
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: true
+    vault_service_state: stopped
+  tasks:
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although Vault was unreachable"
+      rescue:
+        - name: Assert the status probe failed with readable stderr
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Probe Vault status on every node'
+              - ansible_failed_result['rc'] == 1
+              - ansible_failed_result['stderr'] | length > 0
+              - "'censored' not in ansible_failed_result"
+            fail_msg: "Unexpected failure: {{ ansible_failed_task['name'] }}"
+
+    - name: Start Vault again
+      ansible.builtin.systemd:
+        name: vault
+        state: started
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      until: __case_status['rc'] == 2
+      failed_when: __case_status['rc'] != 2
+      retries: 6
+      delay: 5
+
+    - name: Assert Vault was not initialized
+      ansible.builtin.assert:
+        that:
+          - not ((__case_status['stdout'] | from_json)['initialized'] | bool)
+
+# ------------------------------------------------------------------------------
+# Case 2 (V-06): vault_unseal=false on a fresh node finishes quickly and leaves
 # Vault initialized and sealed, with the init file saved on the controller.
 # ------------------------------------------------------------------------------
-- name: Case 1 - vault_unseal false completes and leaves Vault sealed
+- name: Case 2 - vault_unseal false completes and leaves Vault sealed
   hosts: all
   become: true
   gather_facts: false
@@ -67,11 +122,11 @@
           - __case_init_file['stat']['exists']
 
 # ------------------------------------------------------------------------------
-# Case 2 (V-04): a leader that never reaches unsealed must fail the wait gate.
+# Case 3 (V-04): a leader that never reaches unsealed must fail the wait gate.
 # Init used threshold 2; submitting only 1 share is accepted by the unseal API
 # but leaves Vault sealed.
 # ------------------------------------------------------------------------------
-- name: Case 2 - never-unsealing leader fails the wait gate
+- name: Case 3 - never-unsealing leader fails the wait gate
   hosts: all
   become: true
   gather_facts: false
