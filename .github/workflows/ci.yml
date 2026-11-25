@@ -60,10 +60,17 @@ jobs:
         run: "! grep -rnE 'ansible_(architecture|default_ipv4)' tasks defaults templates meta"
       - name: Docs drift gates
         # Keep the licence wording, install pins and the documented CI matrix
-        # in line with the code.
+        # in line with the code. Each gate is an explicit if: bash -e ignores
+        # the exit status of a command negated with '!'.
         run: |
-          ! grep -rn '(OSS)' README.md docs meta
-          ! grep -rn 'feat/galaxy-readiness-v2' README.md docs
+          if grep -rn '(OSS)' README.md docs meta; then
+            echo "Found '(OSS)'; say Community Edition (BUSL 1.1) instead"
+            exit 1
+          fi
+          if grep -rn 'feat/galaxy-readiness-v2' README.md docs; then
+            echo "Found the stale branch name feat/galaxy-readiness-v2"
+            exit 1
+          fi
           if grep -q rockylinux9 README.md && ! grep -q 'distro: rockylinux9' .github/workflows/ci.yml; then
             echo "README.md mentions rockylinux9 but ci.yml does not run it"
             exit 1
