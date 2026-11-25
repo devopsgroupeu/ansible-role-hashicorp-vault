@@ -18,7 +18,7 @@
         name: ansible-role-hashicorp-vault
 
 # ------------------------------------------------------------------------------
-# Case 1 (V-09): an unreachable Vault (service stopped) must fail the status
+# Case 1: an unreachable Vault (service stopped) must fail the status
 # probe with the CLI error visible, and must never be read as "not
 # initialized" (which would run vault operator init).
 # ------------------------------------------------------------------------------
@@ -73,7 +73,7 @@
           - not ((__case_status['stdout'] | from_json)['initialized'] | bool)
 
 # ------------------------------------------------------------------------------
-# Case 2 (V-06): vault_unseal=false on a fresh node finishes quickly and leaves
+# Case 2: vault_unseal=false on a fresh node finishes quickly and leaves
 # Vault initialized and sealed, with the init file saved on the controller.
 # ------------------------------------------------------------------------------
 - name: Case 2 - vault_unseal false completes and leaves Vault sealed
@@ -122,7 +122,7 @@
           - __case_init_file['stat']['exists']
 
 # ------------------------------------------------------------------------------
-# Case 3 (V-04): a leader that never reaches unsealed must fail the wait gate.
+# Case 3: a leader that never reaches unsealed must fail the wait gate.
 # Init used threshold 2; submitting only 1 share is accepted by the unseal API
 # but leaves Vault sealed.
 # ------------------------------------------------------------------------------
@@ -152,7 +152,7 @@
             fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
 
 # ------------------------------------------------------------------------------
-# Case 4 (V-03): a fresh node must not be initialized over an existing
+# Case 4: a fresh node must not be initialized over an existing
 # controller init file (another cluster's root token and keys).
 # ------------------------------------------------------------------------------
 - name: Case 4 - existing controller init file blocks a fresh init
@@ -229,7 +229,7 @@
       become: false
 
 # ------------------------------------------------------------------------------
-# Case 5 (V-18): encryption requested with a missing password file must fail
+# Case 5: encryption requested with a missing password file must fail
 # in validate, before init writes any key material.
 # ------------------------------------------------------------------------------
 - name: Case 5 - missing encryption password file fails before init
@@ -284,7 +284,7 @@
           - not __case_init_file['stat']['exists']
 
 # ------------------------------------------------------------------------------
-# Case 6 (V-18 positive): with a password file the init file is written
+# Case 6 (positive): with a password file the init file is written
 # ansible-vault encrypted, and a later run with --vault-password-file
 # re-unseals Vault after a restart from that encrypted file.
 # ------------------------------------------------------------------------------
@@ -366,7 +366,7 @@
           - not ((__case_status['stdout'] | from_json)['sealed'] | bool)
 
 # ------------------------------------------------------------------------------
-# Case 7 (V-07): the number of PGP keys must match the number of key shares.
+# Case 7: the number of PGP keys must match the number of key shares.
 # ------------------------------------------------------------------------------
 - name: Case 7 - PGP key count mismatch fails in validate
   hosts: all
@@ -396,7 +396,7 @@
             fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
 
 # ------------------------------------------------------------------------------
-# Case 8 (V-07 positive): init with a throwaway PGP key. The share in the init
+# Case 8 (positive): init with a throwaway PGP key. The share in the init
 # file is PGP-encrypted; decrypting it with the test key unseals Vault.
 # ------------------------------------------------------------------------------
 - name: Case 8 - init with PGP keys and unseal with the decrypted share
