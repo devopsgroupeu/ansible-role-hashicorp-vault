@@ -703,8 +703,11 @@
 # 7b. Resolve and probe the token for the token-gated steps (Raft verify and
 #     audit). vault_admin_token wins over the saved root token. A revoked or
 #     expired token (operators are told to revoke the root token) must not
-#     make every later run hang in retries and fail: probe it once and skip
-#     the token-gated steps with a warning when it is not valid.
+#     make every later run hang in retries and fail: skip the token-gated
+#     steps with a warning when Vault rejects the token. Only a definitive
+#     answer counts: right after a multi-node restart there may be no active
+#     node yet and the lookup fails for that reason, so retry until Vault
+#     accepts or rejects the token, and fail when it does neither.
 # ------------------------------------------------------------------------------
 
 - name: Resolve the token for token-gated steps
@@ -724,20 +727,47 @@
   register: __vault_token_lookup
   check_mode: false
   changed_when: false
+  # failed_when: false keeps the result for the verdict below, which fails
+  # with the CLI error when Vault never gave a definitive answer. stdout holds
+  # the token itself, hence no_log here and stderr only in that failure.
   failed_when: false
+  until: >-
+    __vault_token_lookup['rc'] == 0
+    or __vault_token_lookup['stderr'] | lower is search('permission denied|bad token|code: 403')
+  retries: 12
+  delay: 5
   no_log: true
   when:
     - __vault_api_token | length > 0
     - not (__vault_left_sealed | default(false) | bool)
   tags: init_unseal
 
-- name: Record whether the token is valid
+- name: Record whether the token is valid or rejected
   ansible.builtin.set_fact:
-    __vault_token_valid: >-
+    __vault_token_valid: "{{ __vault_token_lookup_ran and __vault_token_lookup['rc'] == 0 }}"
+    __vault_token_rejected: >-
+      {{ __vault_token_lookup_ran and __vault_token_lookup['rc'] != 0
+         and __vault_token_lookup['stderr'] | lower is search('permission denied|bad token|code: 403') }}
+  vars:
+    __vault_token_lookup_ran: >-
       {{ __vault_token_lookup is defined
-         and not (__vault_token_lookup['skipped'] | default(false) | bool)
-         and __vault_token_lookup['rc'] | default(1) == 0 }}
+         and not (__vault_token_lookup['skipped'] | default(false) | bool) }}
   run_once: true
+  tags: init_unseal
+
+- name: Fail when the token lookup gave no definitive answer
+  ansible.builtin.fail:
+    msg: >-
+      vault token lookup on {{ vault_init_bootstrap_node }} kept failing for a
+      reason other than an invalid token (rc={{ __vault_token_lookup['rc'] }}),
+      for example no active node after a restart:
+      {{ __vault_token_lookup['stderr'] }}
+  run_once: true
+  when:
+    - __vault_token_lookup is defined
+    - not (__vault_token_lookup['skipped'] | default(false) | bool)
+    - not (__vault_token_valid | bool)
+    - not (__vault_token_rejected | bool)
   tags: init_unseal
 
 - name: Warn that token-gated steps are skipped
@@ -749,10 +779,7 @@
       revoked or expired?). Skipped: Raft formation verify and audit device
       setup. Set vault_admin_token to a valid token to run them.
   run_once: true
-  when:
-    - __vault_api_token | length > 0
-    - not (__vault_left_sealed | default(false) | bool)
-    - not (__vault_token_valid | bool)
+  when: __vault_token_rejected | bool
   tags: init_unseal
 
 # ------------------------------------------------------------------------------

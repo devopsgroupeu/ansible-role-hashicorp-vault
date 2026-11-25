@@ -9,7 +9,9 @@
 #
 # The test sequence runs converge, idempotence (a second full run must report
 # changed=0 on all nodes), a --limit vault2 re-run (side_effect_limit.yml, must
-# not rewrite retry_join or SANs) and verify. Run manually with:
+# not rewrite retry_join or SANs), a restart of every node followed by a
+# converge (side_effect_restart.yml, must keep the token and verify the Raft
+# peers) and verify. Run manually with:
 #   molecule test -s raft-ha
 # CI runs it on pull requests to main and via workflow_dispatch (see
 # .github/workflows/ci.yml).
@@ -93,6 +95,7 @@ scenario:
     - converge
     - idempotence
     - side_effect side_effect_limit.yml
+    - side_effect side_effect_restart.yml
     - verify
     - cleanup
     - destroy

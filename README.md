@@ -281,9 +281,10 @@ The CI pipeline (`ci.yml`) runs on every push/PR: lint on ansible-core 2.20,
 `rockylinux9` (plus ansible-core 2.20 and 2.22 legs on `debian12`), `default`
 on `debian12`, `ubuntu2404` and `debian13`, `binary` on `debian12` and
 `ubuntu2404`, and `negative`, `tls-disabled` and `upgrade` on `debian12`. The
-`raft-ha` scenario (with idempotence and a `--limit` re-run) runs on pull
-requests to `main` and on demand via workflow_dispatch. EL9 is rendered in CI
-only; live EL9 installs are validated on real hosts.
+`raft-ha` scenario (with idempotence, a `--limit` re-run and a restart of
+every node) runs on pull requests to `main` and on demand via
+workflow_dispatch. EL9 is rendered in CI only; live EL9 installs are validated
+on real hosts.
 
 ---
 

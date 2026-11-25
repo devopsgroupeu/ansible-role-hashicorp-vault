@@ -1,0 +1,51 @@
+---
+# Side effect: restart Vault on every node at once, as the restart handler does
+# after a config or version change, then converge. Right after the followers
+# are unsealed there may be no active node yet. The token lookup must wait for
+# a definitive answer instead of reporting the saved root token as invalid, so
+# Raft formation verify and audit setup still run.
+
+- name: Restart Vault on every node
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restart vault.service
+      ansible.builtin.systemd:
+        name: vault
+        state: restarted
+
+- name: Converge after the restart
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # The Raft verify task header, then any lines of the same task (no new
+    # TASK header) up to an ok result: the task ran instead of being skipped.
+    __restart_verify_ran: 'Verify Raft peer formation \(bootstrap node\)\][^\n]*\n(?:(?!TASK \[)[^\n]*\n)*ok: \['
+  tasks:
+    - name: Run converge.yml
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      register: __restart_run
+      changed_when: false
+      failed_when: false
+
+    - name: Show the play recap
+      ansible.builtin.debug:
+        msg: "{{ __restart_run['stdout_lines'] | select('search', 'ok=') | list }}"
+
+    - name: Assert the run passed, kept the token and verified the Raft peers
+      ansible.builtin.assert:
+        that:
+          - __restart_run['rc'] == 0
+          - __restart_run['stdout'] is not search('failed=[1-9]')
+          - __restart_run['stdout'] is not search('is not valid \(token lookup')
+          - __restart_run['stdout'] is search(__restart_verify_ran)
+        fail_msg: "Converge after a full restart failed, rejected the token or skipped Raft verify: {{ __restart_run['stdout_lines'][-20:] }}"
