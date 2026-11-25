@@ -187,7 +187,7 @@ or seal secrets run with `no_log: true`.
 | Variable | Default | Description |
 |---|---|---|
 | `vault_init` | `true` | Run idempotent Vault initialization on the bootstrap node. Skipped when Vault is already initialized. |
-| `vault_unseal` | `true` | Run idempotent Shamir unseal after init. No-op under auto-unseal (KMS unseals on startup). |
+| `vault_unseal` | `true` | Run idempotent Shamir unseal after init. No-op under auto-unseal (KMS unseals on startup). The role fails when a node is initialized and sealed but no unseal keys are available (no init file at `vault_init_output_path` on this controller), instead of finishing with Vault sealed. |
 | `vault_init_key_shares` | `5` | Number of Shamir key shares to generate. |
 | `vault_init_key_threshold` | `3` | Minimum shares required to reconstruct the master key. |
 | `vault_init_recovery_shares` | `5` | Recovery key shares (auto-unseal init). |

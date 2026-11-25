@@ -505,3 +505,59 @@
       ansible.builtin.systemd:
         name: vault
         state: started
+
+# ------------------------------------------------------------------------------
+# Case 10: a sealed node with vault_unseal true and no init file on this
+# controller must fail and name the init file path, not end green and sealed.
+# Runs the role in a nested ansible-playbook: earlier cases left unseal keys
+# from their own init in this run's host facts.
+# ------------------------------------------------------------------------------
+- name: Case 10 - sealed node without unseal keys fails
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    __case_missing_init_file: /tmp/.vault_init_molecule_negative_moved.json
+  tasks:
+    - name: Restart Vault so it comes back sealed
+      ansible.builtin.systemd:
+        name: vault
+        state: restarted
+
+    - name: Run the role without an init file on the controller
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge_role.yml"
+          - --extra-vars
+          - "{{ {'vault_init': true, 'vault_unseal': true, 'vault_init_output_path': __case_missing_init_file} | to_json }}"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      delegate_to: localhost
+      become: false
+      register: __case_nokeys_run
+      changed_when: false
+      failed_when: false
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      failed_when: __case_status['rc'] != 2
+
+    - name: Assert the missing keys check fired, named the init file and Vault stayed sealed
+      ansible.builtin.assert:
+        that:
+          - __case_nokeys_run['rc'] != 0
+          - __case_nokeys_output is search('Fail when a sealed node has no unseal keys')
+          - __case_nokeys_output is search(__case_missing_init_file)
+          - (__case_status['stdout'] | from_json)['sealed'] | bool
+        fail_msg: "Unexpected result without unseal keys: {{ __case_nokeys_run['stdout_lines'][-20:] }}"
+      vars:
+        __case_nokeys_output: "{{ __case_nokeys_run['stdout'] ~ __case_nokeys_run['stderr'] }}"

@@ -499,6 +499,28 @@
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
+# 5d. A sealed Shamir node this run should unseal needs the unseal keys, from
+#     this run's init or from the controller init file. Without them every
+#     unseal and wait task skips and the run ends green with Vault sealed.
+# ------------------------------------------------------------------------------
+
+- name: Fail when a sealed node has no unseal keys
+  ansible.builtin.fail:
+    msg: >-
+      Vault on {{ inventory_hostname }} is initialized and sealed and
+      vault_unseal is true, but no unseal keys are available: the init file
+      {{ vault_init_output_path }} was not found on this controller. Put the
+      init file at that path (or point vault_init_output_path at it), or
+      unseal Vault manually and set vault_unseal to false.
+  when:
+    - vault_unseal | bool
+    - vault_seal_type == 'shamir'
+    - __vault_status['initialized'] | default(false) | bool
+    - __vault_status['sealed'] | default(true) | bool
+    - __vault_unseal_keys is not defined
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
 # 6. Unseal — Shamir only. ORDERED for Ansible's default linear strategy: every
 #    task completes across the whole batch before the next begins, so the LEADER
 #    MUST be unsealed and active before followers can join/initialize via Raft.
