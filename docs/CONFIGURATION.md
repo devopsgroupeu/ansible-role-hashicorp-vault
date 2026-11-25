@@ -49,7 +49,7 @@ is prefixed `vault_`.
 | `vault_config_dir` | `"/etc/vault.d"` | Directory for `vault.hcl` and `vault.env`. |
 | `vault_data_dir` | `"/opt/vault/data"` | Raft integrated storage data directory (role creates it). |
 | `vault_tls_dir` | `"/opt/vault/tls"` | Directory for TLS material (cert, key, CA). |
-| `vault_audit_dir` | `"/opt/vault/audit"` | Directory for the file audit device log. |
+| `vault_audit_dir` | `"/opt/vault/audit"` | Directory for the file audit device log. On RHEL-family hosts with SELinux enforcing, see [Requests fail: audit device cannot write](TROUBLESHOOTING.md#requests-fail-audit-device-cannot-write) for the label logrotate needs. |
 | `vault_user` | `"vault"` | Service user. Package install creates it; binary path creates it via tasks. |
 | `vault_group` | `"vault"` | Service group. |
 | `vault_bin_path` | `/usr/bin/vault` (package) / `/usr/local/bin/vault` (binary) | Vault binary path. Auto-computed from `vault_install_method`; override only when your distro places it elsewhere. |

@@ -336,6 +336,20 @@ device is the only one.
 `systemctl reload vault` afterwards. Check the setup with
 `logrotate -d /etc/logrotate.d/vault-audit`.
 
+**SELinux (RHEL family, enforcing):** the role's `restorecon` gives the default
+`vault_audit_dir` (`/opt/vault/audit`) the default `/opt` label `usr_t`.
+logrotate runs confined as `logrotate_t` and may be denied renaming and
+creating files with that label, so the audit log is never rotated. After the
+first rotation, check for denials with `ausearch -m avc -c logrotate`. If there
+are any, either keep the audit log under `/var/log` (for example
+`vault_audit_dir: /var/log/vault`, which `restorecon` labels `var_log_t`), or
+label the default directory as a log directory:
+
+```bash
+semanage fcontext -a -t var_log_t '/opt/vault/audit(/.*)?'
+restorecon -R /opt/vault/audit
+```
+
 ---
 
 ## Useful commands
