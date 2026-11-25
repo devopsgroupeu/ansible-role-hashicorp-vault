@@ -308,7 +308,7 @@ ansible-role-hashicorp-vault/
 ├── defaults/main.yml              # 114 public variables
 ├── vars/main.yml                  # OS-family maps (internal)
 ├── meta/main.yml                  # Galaxy metadata
-├── meta/argument_specs.yml        # 1:1 with defaults (113 entries)
+├── meta/argument_specs.yml        # 1:1 with defaults (114 entries)
 ├── tasks/
 │   ├── main.yml                   # orchestrator
 │   ├── validate.yml               # cross-var assertions
