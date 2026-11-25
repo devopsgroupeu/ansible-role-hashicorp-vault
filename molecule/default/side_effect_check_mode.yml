@@ -33,9 +33,7 @@
           - __check_run['rc'] == 0
           - __check_run['stdout'] is not search('changed=[1-9]')
           - __check_run['stdout'] is not search('failed=[1-9]')
-          - >-
-            ((__check_run['end'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))
-            - (__check_run['start'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))).total_seconds() < 60
-        # A full converge pass takes about 30 s here; a probe spinning in the
-        # wait loops takes minutes, so 60 s separates the two.
-        fail_msg: "Check mode run failed, changed something or took 60 s or more: {{ __check_run['stdout_lines'][-15:] }}"
+          # On a healthy node no probe or wait task may retry. Asserting on
+          # retries instead of wall-clock time does not depend on runner speed.
+          - (__check_run['stdout'] ~ __check_run['stderr']) is not search('FAILED - RETRYING')
+        fail_msg: "Check mode run failed, changed something or retried a probe: {{ __check_run['stdout_lines'][-15:] }}"

@@ -68,30 +68,42 @@
           - not ((__case_status['stdout'] | from_json)['initialized'] | bool)
 
 # ------------------------------------------------------------------------------
-# Case 2: vault_unseal=false on a fresh node finishes quickly and leaves
-# Vault initialized and sealed, with the init file saved on the controller.
+# Case 2: vault_unseal=false on a fresh node finishes without waiting for an
+# unseal and leaves Vault initialized and sealed, with the init file saved on
+# the controller. Runs the role in a nested ansible-playbook so the output can
+# be checked for retries of the wait tasks.
 # ------------------------------------------------------------------------------
 - name: Case 2 - vault_unseal false completes and leaves Vault sealed
   hosts: all
   become: true
   gather_facts: false
-  vars:
-    vault_init: true
-    vault_unseal: false
   tasks:
-    - name: Record start time
-      ansible.builtin.set_fact:
-        __case_start: "{{ lookup('ansible.builtin.pipe', 'date +%s') }}"
+    - name: Run the role with vault_unseal false
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge_role.yml"
+          - --extra-vars
+          - "{{ {'vault_init': true, 'vault_unseal': false} | to_json }}"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      delegate_to: localhost
+      become: false
+      register: __case_nounseal_run
+      changed_when: false
+      failed_when: false
 
-    - name: Include hashicorp_vault role
-      ansible.builtin.include_role:
-        name: ansible-role-hashicorp-vault
-
-    - name: Assert the run did not wait for an unseal
+    - name: Assert the run passed and did not wait for an unseal
       ansible.builtin.assert:
         that:
-          - (lookup('ansible.builtin.pipe', 'date +%s') | int) - (__case_start | int) < 60
-        fail_msg: "vault_unseal=false run took 60 s or more; it waited for an unseal"
+          - __case_nounseal_run['rc'] == 0
+          - >-
+            (__case_nounseal_run['stdout'] ~ __case_nounseal_run['stderr'])
+            is not search('RETRYING: .*: Wait for')
+        fail_msg: "vault_unseal=false run failed or retried a wait task: {{ __case_nounseal_run['stdout_lines'][-20:] }}"
 
     - name: Query Vault status
       ansible.builtin.command: vault status -format=json

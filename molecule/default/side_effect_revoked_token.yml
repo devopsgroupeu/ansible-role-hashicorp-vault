@@ -1,6 +1,6 @@
 ---
 # Side effect: revoke the saved root token (as production hardening advises),
-# then converge again. The run must finish quickly without failures or
+# then converge again. The run must finish without retries, failures or
 # changes and warn that the token-gated steps were skipped.
 
 - name: Revoke the saved root token
@@ -47,14 +47,13 @@
       ansible.builtin.debug:
         msg: "{{ __revoked_run['stdout_lines'] | select('search', 'ok=') | list }}"
 
-    - name: Assert the run passed quickly, changed nothing and warned
+    - name: Assert the run passed without retries, changed nothing and warned
       ansible.builtin.assert:
         that:
           - __revoked_run['rc'] == 0
           - __revoked_run['stdout'] is not search('changed=[1-9]')
           - __revoked_run['stdout'] is not search('failed=[1-9]')
           - __revoked_run['stdout'] is search('Skipped. Raft formation verify and audit device')
-          - >-
-            ((__revoked_run['end'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))
-            - (__revoked_run['start'] | to_datetime('%Y-%m-%d %H:%M:%S.%f'))).total_seconds() < 120
-        fail_msg: "Revoked-token run failed, changed something, did not warn or took 120 s or more: {{ __revoked_run['stdout_lines'][-20:] }}"
+          # A revoked token is a definitive answer: nothing may retry on it.
+          - (__revoked_run['stdout'] ~ __revoked_run['stderr']) is not search('FAILED - RETRYING')
+        fail_msg: "Revoked-token run failed, changed something, did not warn or retried: {{ __revoked_run['stdout_lines'][-20:] }}"
