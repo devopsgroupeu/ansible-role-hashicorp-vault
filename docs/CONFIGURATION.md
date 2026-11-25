@@ -261,7 +261,7 @@ device setup is skipped with a warning.
 | Variable | Default | Description |
 |---|---|---|
 | `vault_service_enabled` | `true` | Enable `vault.service` at boot. |
-| `vault_service_state` | `"started"` | Desired systemd service state after configuration. Choices: `started`, `stopped`, `restarted`, `reloaded`. |
+| `vault_service_state` | `"started"` | Desired systemd service state after configuration. Choices: `started`, `stopped`, `restarted`, `reloaded`. With `stopped` (install-only runs, e.g. image baking) the role skips init, unseal, Raft formation verify and audit device setup, and the restart and reload handlers leave the service stopped. |
 | `vault_config_only` | `false` | Render-only mode: skip install, service management, and init/unseal. Used by the `render` Molecule scenario for offline template validation. |
 
 ---

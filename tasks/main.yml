@@ -25,14 +25,32 @@
   ansible.builtin.meta: flush_handlers
   when: not vault_config_only | bool
 
+# A stopped service (e.g. install-only runs for image baking) has no API to
+# probe, so skip everything that talks to Vault.
+- name: Report that init, unseal and audit are skipped (service stopped)
+  ansible.builtin.debug:
+    msg: >-
+      vault_service_state is stopped, so Vault on {{ inventory_hostname }} is
+      not running. Skipped: init, unseal, Raft formation verify and audit
+      device setup.
+  when:
+    - not vault_config_only | bool
+    - vault_service_state == 'stopped'
+  tags:
+    - init_unseal
+    - audit
+
 - name: Initialize and unseal Vault
   ansible.builtin.include_tasks: init_unseal.yml
-  when: not vault_config_only | bool
+  when:
+    - not vault_config_only | bool
+    - vault_service_state != 'stopped'
   tags: init_unseal
 
 - name: Enable audit device
   ansible.builtin.include_tasks: audit.yml
   when:
     - not vault_config_only | bool
+    - vault_service_state != 'stopped'
     - vault_audit_enabled | bool
   tags: audit

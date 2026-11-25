@@ -18,9 +18,9 @@
         name: ansible-role-hashicorp-vault
 
 # ------------------------------------------------------------------------------
-# Case 1: an unreachable Vault (service stopped) must fail the status
-# probe with the CLI error visible, and must never be read as "not
-# initialized" (which would run vault operator init).
+# Case 1: an unreachable Vault API (vault_api_addr on a port nothing listens
+# on) must fail the status probe with the CLI error visible, and must never be
+# read as "not initialized" (which would run vault operator init).
 # ------------------------------------------------------------------------------
 - name: Case 1 - status probe errors fail instead of reading as uninitialized
   hosts: all
@@ -29,7 +29,7 @@
   vars:
     vault_init: true
     vault_unseal: true
-    vault_service_state: stopped
+    vault_api_addr: "https://127.0.0.1:18299"
   tasks:
     - name: Run the role and capture the failure
       block:
@@ -49,11 +49,6 @@
               - ansible_failed_result['stderr'] | length > 0
               - "'censored' not in ansible_failed_result"
             fail_msg: "Unexpected failure: {{ ansible_failed_task['name'] }}"
-
-    - name: Start Vault again
-      ansible.builtin.systemd:
-        name: vault
-        state: started
 
     - name: Query Vault status
       ansible.builtin.command: vault status -format=json
@@ -476,3 +471,37 @@
         that:
           - not ((__case_unseal['stdout'] | from_json)['sealed'] | bool)
         fail_msg: "Vault is still sealed after unsealing with the decrypted PGP share"
+
+# ------------------------------------------------------------------------------
+# Case 9: vault_service_state stopped with init and unseal off (install-only,
+# e.g. image baking) must pass, skip everything that talks to Vault and leave
+# the service stopped.
+# ------------------------------------------------------------------------------
+- name: Case 9 - stopped service with init and unseal off passes
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: false
+    vault_unseal: false
+    vault_service_state: stopped
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert vault.service is stopped
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['services']['vault.service']['state'] == 'stopped'
+        fail_msg: >-
+          vault.service is {{ ansible_facts['services']['vault.service']['state'] }}
+          after a run with vault_service_state stopped
+
+    - name: Start Vault again
+      ansible.builtin.systemd:
+        name: vault
+        state: started

@@ -5,12 +5,16 @@
   listen: "reload systemd daemon"
   when: not vault_config_only | bool
 
+# A restart or reload would start a service that vault_service_state asks to
+# keep stopped.
 - name: Restart HashiCorp Vault
   ansible.builtin.systemd:
     name: vault
     state: restarted
   listen: "restart vault"
-  when: not vault_config_only | bool
+  when:
+    - not vault_config_only | bool
+    - vault_service_state != 'stopped'
 
 # Wait for Vault API to be listening before sending SIGHUP (issue #27100).
 # Derives host:port from vault_listen_address; 0.0.0.0 → 127.0.0.1.
@@ -26,11 +30,15 @@
     state: started
     timeout: 60
   listen: "reload vault"
-  when: not vault_config_only | bool
+  when:
+    - not vault_config_only | bool
+    - vault_service_state != 'stopped'
 
 - name: Reload HashiCorp Vault
   ansible.builtin.systemd:
     name: vault
     state: reloaded
   listen: "reload vault"
-  when: not vault_config_only | bool
+  when:
+    - not vault_config_only | bool
+    - vault_service_state != 'stopped'
