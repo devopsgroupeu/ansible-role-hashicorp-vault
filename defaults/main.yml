@@ -178,6 +178,14 @@ vault_raft_node_id: "{{ inventory_hostname }}"
 # retry_join blocks and to gate init/unseal delegation.
 vault_raft_peers: "{{ groups['vault'] | default([inventory_hostname]) }}"
 
+# Continue when an inventory peer in vault_raft_peers cannot be reached to
+# gather its network facts. By default the play stops and names the peer.
+# When true, that peer's retry_join address falls back to its inventory
+# hostname and its IP SAN is dropped, which rewrites vault.hcl and the
+# role-generated certificates and restarts Vault on the reachable nodes. Use
+# it only to converge or re-unseal the surviving nodes of a degraded cluster.
+vault_allow_unreachable_peers: false
+
 # Raft performance multiplier, 1 to 10. 1 = on-prem LAN tight timing
 # (recommended). Use 5 for cloud/WAN deployments with higher latency.
 vault_raft_performance_multiplier: 1

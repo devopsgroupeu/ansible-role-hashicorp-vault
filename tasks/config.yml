@@ -8,17 +8,69 @@
 # would fall back to hostnames and drop IP SANs, rewriting vault.hcl and
 # restarting Vault. Gather network facts for every inventory peer that lacks
 # them. Peers that are not in the inventory keep the hostname fallback.
-- name: Gather network facts for peers missing them
+# A peer that is down must not abort the play for every host with an error
+# blamed on the run_once host. Probe the peers first and gather only from the
+# reachable ones: one unreachable item fails the whole delegated loop, and
+# Ansible then drops the facts of every item. The assert below names the
+# unreachable peers. ignore_errors is needed on top of ignore_unreachable,
+# because a run_once loop with an unreachable item otherwise ends the play.
+- name: Probe peers missing network facts
+  ansible.builtin.ping:
+  delegate_to: "{{ item }}"
+  run_once: true
+  ignore_unreachable: true
+  ignore_errors: true
+  register: __vault_peer_probe
+  loop: "{{ vault_raft_peers | select('in', groups['all']) | list }}"
+  when:
+    - not vault_config_only | bool
+    - "'default_ipv4' not in (hostvars[item]['ansible_facts'] | default({}))"
+  tags: config
+
+- name: Gather network facts for reachable peers missing them
   ansible.builtin.setup:
     gather_subset:
       - network
   delegate_to: "{{ item }}"
   delegate_facts: true
   run_once: true
-  loop: "{{ vault_raft_peers | select('in', groups['all']) | list }}"
+  # Only peers that answered the probe (skipped and unreachable items have no
+  # ping key).
+  loop: >-
+    {{ __vault_peer_probe['results'] | default([])
+       | selectattr('ping', 'defined') | map(attribute='item') | list }}
+  when: not vault_config_only | bool
+  tags: config
+
+# An inventory peer still without facts is unreachable. Its hostname fallback
+# would rewrite vault.hcl and the certificates and restart Vault on every
+# reachable node, so stop unless vault_allow_unreachable_peers accepts that
+# (for example to re-unseal the surviving nodes of a degraded cluster).
+- name: Assert every inventory peer was reachable for network facts
+  ansible.builtin.assert:
+    that:
+      - __vault_unreachable_peers | length == 0
+    fail_msg: >-
+      Raft peer(s) {{ __vault_unreachable_peers | join(', ') }} could not be
+      reached to gather network facts. Without them their retry_join address
+      falls back to the inventory hostname and their IP SAN is dropped, which
+      rewrites vault.hcl and the certificates and restarts Vault on the
+      reachable nodes. Bring the peer(s) back, or set
+      vault_allow_unreachable_peers to true to continue with that fallback.
+    quiet: true
+  vars:
+    __vault_unreachable_peers: >-
+      {%- set missing = [] -%}
+      {%- for peer in vault_raft_peers
+            if peer in groups['all']
+            and 'default_ipv4' not in (hostvars[peer]['ansible_facts'] | default({})) -%}
+        {%- set _ = missing.append(peer) -%}
+      {%- endfor -%}
+      {{ missing }}
+  run_once: true
   when:
     - not vault_config_only | bool
-    - "'default_ipv4' not in (hostvars[item]['ansible_facts'] | default({}))"
+    - not (vault_allow_unreachable_peers | bool)
   tags: config
 
 # Build __vault_retry_join_peers: list of {addr: <ip|hostname>} for every peer

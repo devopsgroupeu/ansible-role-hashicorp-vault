@@ -1,0 +1,147 @@
+---
+# Side effect: stop the vault3 container to get a degraded cluster.
+#   1. A converge limited to the survivors, and a full converge, must stop with
+#      an assert that names vault3, before anything on vault1 and vault2 is
+#      rewritten (instead of an UNREACHABLE blamed on the run_once host).
+#   2. With vault_allow_unreachable_peers the limited converge must pass on the
+#      survivors (it takes the hostname fallback and restarts them).
+#   3. After vault3 is started again, a full converge must pass and re-unseal
+#      it, so verify sees a healthy three-node cluster.
+
+- name: Record vault.hcl checksums on the survivors
+  hosts: vault1:vault2
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stat vault.hcl
+      ansible.builtin.stat:
+        path: /etc/vault.d/vault.hcl
+        checksum_algorithm: sha256
+      register: __down_hcl_before
+
+- name: Converge with vault3 down
+  hosts: localhost
+  gather_facts: false
+  vars:
+    __down_converge_argv:
+      - ansible-playbook
+      - --inventory
+      - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+      - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+    __down_names_vault3: 'Raft peer\(s\) vault3 could not be reached'
+  environment:
+    ANSIBLE_NOCOLOR: "1"
+    ANSIBLE_FORCE_COLOR: "0"
+  tasks:
+    - name: Stop the vault3 container
+      ansible.builtin.command: docker stop vault3
+      changed_when: true
+
+    - name: Run converge.yml limited to the survivors
+      ansible.builtin.command:
+        argv: "{{ __down_converge_argv + ['--limit', 'vault1,vault2'] }}"
+      register: __down_limited_run
+      changed_when: false
+      failed_when: false
+
+    - name: Run converge.yml on every host
+      ansible.builtin.command:
+        argv: "{{ __down_converge_argv }}"
+      register: __down_full_run
+      changed_when: false
+      failed_when: false
+
+    - name: Assert both runs stopped at the peer assert naming vault3
+      ansible.builtin.assert:
+        that:
+          # Failures go to stderr (display_failed_stderr), the recap to stdout.
+          - __down_limited_run['rc'] != 0
+          - (__down_limited_run['stdout'] ~ __down_limited_run['stderr']) is search(__down_names_vault3)
+          - __down_limited_run['stdout'] is not search('unreachable=[1-9]')
+          - __down_full_run['rc'] != 0
+          - (__down_full_run['stdout'] ~ __down_full_run['stderr']) is search(__down_names_vault3)
+        fail_msg: >-
+          A run with vault3 down did not stop at the peer assert:
+          limited {{ __down_limited_run['stdout_lines'][-12:] }}
+          full {{ __down_full_run['stdout_lines'][-12:] }}
+
+- name: Compare vault.hcl checksums on the survivors
+  hosts: vault1:vault2
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stat vault.hcl
+      ansible.builtin.stat:
+        path: /etc/vault.d/vault.hcl
+        checksum_algorithm: sha256
+      register: __down_hcl_after
+
+    - name: Assert vault.hcl is unchanged
+      ansible.builtin.assert:
+        that:
+          - __down_hcl_after['stat']['checksum'] == __down_hcl_before['stat']['checksum']
+        fail_msg: "vault.hcl on {{ inventory_hostname }} changed although the run stopped"
+
+- name: Converge the survivors and start vault3 again
+  hosts: localhost
+  gather_facts: false
+  vars:
+    __down_converge_argv:
+      - ansible-playbook
+      - --inventory
+      - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+      - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+  environment:
+    ANSIBLE_NOCOLOR: "1"
+    ANSIBLE_FORCE_COLOR: "0"
+  tasks:
+    - name: Run converge.yml on the survivors with vault_allow_unreachable_peers
+      ansible.builtin.command:
+        argv: "{{ __down_converge_argv + ['--limit', 'vault1,vault2', '--extra-vars', 'vault_allow_unreachable_peers=true'] }}"
+      register: __down_allowed_run
+      changed_when: false
+      failed_when: false
+
+    - name: Start the vault3 container
+      ansible.builtin.command: docker start vault3
+      changed_when: true
+
+- name: Wait for vault3
+  hosts: vault3
+  gather_facts: false
+  tasks:
+    - name: Wait for vault3 to accept connections
+      ansible.builtin.wait_for_connection:
+        timeout: 120
+
+- name: Converge the restored cluster
+  hosts: localhost
+  gather_facts: false
+  vars:
+    __down_converge_argv:
+      - ansible-playbook
+      - --inventory
+      - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+      - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge.yml"
+  environment:
+    ANSIBLE_NOCOLOR: "1"
+    ANSIBLE_FORCE_COLOR: "0"
+  tasks:
+    - name: Run converge.yml on every host
+      ansible.builtin.command:
+        argv: "{{ __down_converge_argv }}"
+      register: __down_restored_run
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the survivors converged and the full cluster recovered
+      ansible.builtin.assert:
+        that:
+          - __down_allowed_run['rc'] == 0
+          - __down_allowed_run['stdout'] is not search('failed=[1-9]')
+          - __down_restored_run['rc'] == 0
+          - __down_restored_run['stdout'] is not search('failed=[1-9]')
+        fail_msg: >-
+          Degraded or restored converge failed:
+          survivors {{ __down_allowed_run['stdout_lines'][-12:] }}
+          restored {{ __down_restored_run['stdout_lines'][-12:] }}
