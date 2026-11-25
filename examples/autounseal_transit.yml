@@ -8,7 +8,7 @@
 #     Encryption key: autounseal
 #     Token: orphan periodic token with no max TTL
 #
-#   This cluster (the "sealed" cluster) — examples/inventory/vault_cluster.yml or equivalent:
+#   This cluster (the "sealed" cluster) - examples/inventory/vault_cluster.yml or equivalent:
 #     all:
 #       children:
 #         vault:
@@ -93,7 +93,7 @@
   roles:
     - role: devopsgroupeu.hashicorp-vault
       vars:
-        # ---- TLS (BYO — production default) ------------------------------------
+        # ---- TLS (BYO - production default) ------------------------------------
         vault_tls_generate_certs: false
         vault_tls_cert_file: "/opt/vault/tls/vault-cert.pem"
         vault_tls_key_file: "/opt/vault/tls/vault-key.pem"
@@ -114,7 +114,7 @@
 
         # ---- Init / unseal ------------------------------------------------------
         # With transit auto-unseal, Vault returns recovery keys (not unseal keys).
-        # Recovery keys gate root-token generation and rekey only — they cannot
+        # Recovery keys gate root-token generation and rekey only - they cannot
         # unseal the cluster if the KMS (unsealer) is unavailable.
         vault_init_recovery_shares: 5
         vault_init_recovery_threshold: 3

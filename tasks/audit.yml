@@ -2,7 +2,8 @@
 # ==============================================================================
 # Enable Vault file audit device idempotently.
 # Only included when vault_config_only=false and vault_audit_enabled=true
-# (gated in main.yml). Requires a root token from init_unseal.yml.
+# (gated in main.yml). Requires a valid token (vault_admin_token or the root
+# token) resolved and probed in init_unseal.yml.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -20,35 +21,60 @@
   tags: audit
 
 # ------------------------------------------------------------------------------
+# 1a. Rotate the audit log. The file device never rotates its own log, and when
+#     no audit device can write (e.g. a full disk) Vault refuses every audited
+#     request. Runs on every node: each node writes its own audit log.
+# ------------------------------------------------------------------------------
+
+- name: Install logrotate for the audit log
+  ansible.builtin.package:
+    name: logrotate
+    state: present
+  when: vault_audit_logrotate_enabled | bool
+  tags: audit
+
+- name: Render logrotate config for the audit log
+  ansible.builtin.template:
+    src: vault-audit.logrotate.j2
+    dest: /etc/logrotate.d/vault-audit
+    owner: root
+    group: root
+    mode: "0644"
+  when: vault_audit_logrotate_enabled | bool
+  tags: audit
+
+# ------------------------------------------------------------------------------
 # 2. Check which audit devices are already enabled.
 #    Audit-device configuration is cluster-wide (stored in Raft), so the list
 #    and the enable below run ONCE on the active/bootstrap node. Standby
 #    followers reject writes (and would redirect reads), so delegating to the
 #    bootstrap node is both correct and avoids per-follower failures.
-#    changed_when: false — read-only operation.
-#    no_log: true — VAULT_TOKEN in environment.
+#    changed_when: false - read-only operation.
+#    no_log: true - VAULT_TOKEN in environment.
 # ------------------------------------------------------------------------------
 
 - name: List currently enabled audit devices
   ansible.builtin.command: >-
     {{ vault_bin_path }} audit list -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+  environment: "{{ __vault_bootstrap_cli_env | combine({'VAULT_TOKEN': __vault_api_token | default('')}) }}"
   register: __vault_audit_list_cmd
+  check_mode: false
   changed_when: false
-  failed_when: __vault_audit_list_cmd['rc'] not in [0, 2]
+  # Only "no devices" may pass as an empty list; any other error (for example
+  # permission denied, also rc=2) must fail here instead of reading as empty.
+  failed_when: >-
+    __vault_audit_list_cmd['rc'] != 0
+    and 'no audit devices' not in (__vault_audit_list_cmd['stdout'] ~ __vault_audit_list_cmd['stderr']) | lower
   no_log: true
   run_once: true
   delegate_to: "{{ vault_init_bootstrap_node }}"
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
+    - not (__vault_left_sealed | default(false) | bool)
   tags: audit
 
-# rc=2 from 'vault audit list' means no devices enabled yet (empty list).
-# Parse JSON only when rc=0 and stdout is non-empty.
+# 'vault audit list' may report "no audit devices" (empty list). Parse JSON
+# only when rc=0 and stdout is non-empty.
 - name: Parse enabled audit devices
   ansible.builtin.set_fact:
     __vault_audit_devices: >-
@@ -65,7 +91,7 @@
 
 # ------------------------------------------------------------------------------
 # 3. Enable the file audit device when not already present at vault_audit_path.
-#    no_log: true — VAULT_TOKEN in environment.
+#    no_log: true - VAULT_TOKEN in environment.
 # ------------------------------------------------------------------------------
 
 - name: Enable file audit device
@@ -75,10 +101,7 @@
     file
     file_path={{ vault_audit_file_path }}{%- for key, value in (vault_audit_options | default({}) | dict2items) %}
     {{ key }}={{ value }}{%- endfor %}
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+  environment: "{{ __vault_bootstrap_cli_env | combine({'VAULT_TOKEN': __vault_api_token | default('')}) }}"
   register: __vault_audit_enable_cmd
   changed_when: __vault_audit_enable_cmd['rc'] == 0
   failed_when: __vault_audit_enable_cmd['rc'] != 0
@@ -86,8 +109,9 @@
   run_once: true
   delegate_to: "{{ vault_init_bootstrap_node }}"
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
+    - not (__vault_left_sealed | default(false) | bool)
     - __vault_audit_devices is defined
     - vault_audit_path not in (__vault_audit_devices | default({}))
+    - not ansible_check_mode
   tags: audit

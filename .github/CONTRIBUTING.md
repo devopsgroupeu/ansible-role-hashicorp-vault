@@ -65,12 +65,12 @@ You do not need to open an issue for:
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
-- `feat:` — new feature
-- `fix:` — bug fix
-- `docs:` — documentation only
-- `refactor:` — code restructuring without feature change
-- `test:` — Molecule / CI changes
-- `chore:` — maintenance (deps, lint config, etc.)
+- `feat:` - new feature
+- `fix:` - bug fix
+- `docs:` - documentation only
+- `refactor:` - code restructuring without feature change
+- `test:` - Molecule / CI changes
+- `chore:` - maintenance (deps, lint config, etc.)
 
 Breaking changes: append `!` after the type (e.g. `feat!:`) and add a
 `BREAKING CHANGE:` footer.
@@ -95,4 +95,4 @@ Report them privately by email at info@devopsgroup.sk.
 
 ## Community
 
-Maintained by [DevOpsGroup s.r.o.](https://devopsgroup.sk/) — info@devopsgroup.sk
+Maintained by [DevOpsGroup s.r.o.](https://devopsgroup.sk/) - info@devopsgroup.sk

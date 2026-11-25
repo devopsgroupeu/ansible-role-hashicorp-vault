@@ -7,7 +7,7 @@ Common issues and resolutions for the `devopsgroupeu.hashicorp-vault` role.
 ## Table of Contents
 
 - [Sealed cluster recovery](#sealed-cluster-recovery)
-- [Auto-unseal: recovery keys cannot unseal — KMS down](#auto-unseal-recovery-keys-cannot-unseal--kms-down)
+- [Auto-unseal: recovery keys cannot unseal - KMS down](#auto-unseal-recovery-keys-cannot-unseal--kms-down)
 - [Transit auto-unseal: token expired or revoked](#transit-auto-unseal-token-expired-or-revoked)
 - [TLS / x509 / SAN errors](#tls--x509--san-errors)
 - [mlock and swap](#mlock-and-swap)
@@ -15,6 +15,7 @@ Common issues and resolutions for the `devopsgroupeu.hashicorp-vault` role.
 - [Raft join failures](#raft-join-failures)
 - [Package vs binary path issues](#package-vs-binary-path-issues)
 - [Init output written unencrypted / encryption skipped](#init-output-written-unencrypted--encryption-skipped)
+- [Requests fail: audit device cannot write](#requests-fail-audit-device-cannot-write)
 - [Useful commands](#useful-commands)
 
 ---
@@ -32,7 +33,8 @@ but they only run during the Ansible play. After an OS reboot the node starts se
 
 ```bash
 # Retrieve unseal key from the init file on the controller
-ansible-vault view .vault_init_<cluster_id>.json --vault-password-file ~/.vault-pass
+# (vault_init_output_path, default ~/.vault/.vault_init_<cluster_id>.json)
+ansible-vault view ~/.vault/.vault_init_<cluster_id>.json --vault-password-file ~/.vault-pass
 
 # On the sealed node (run for each required share until threshold is met)
 export VAULT_ADDR=https://127.0.0.1:8200
@@ -49,7 +51,7 @@ For production, consider Transit auto-unseal to eliminate manual unseal on resta
 
 ---
 
-## Auto-unseal: recovery keys cannot unseal — KMS down
+## Auto-unseal: recovery keys cannot unseal - KMS down
 
 **This is a critical operational constraint. Read carefully.**
 
@@ -68,7 +70,7 @@ With auto-unseal (`vault_seal_type: transit|awskms|azurekeyvault|gcpckms`), Vaul
 
 **Mitigations:**
 - Protect the KMS key with deletion protection / soft-delete where available.
-- For AWS KMS: enable key deletion waiting period (7–30 days).
+- For AWS KMS: enable key deletion waiting period (7-30 days).
 - For Azure Key Vault: enable soft-delete and purge protection.
 - For GCP Cloud KMS: key-version destruction is scheduled (default 24-hour delay
   before permanent deletion). Increase the scheduled duration to at least 30 days.
@@ -76,14 +78,14 @@ With auto-unseal (`vault_seal_type: transit|awskms|azurekeyvault|gcpckms`), Vaul
   policy to prevent accidental key destruction. Monitor all KMS operations with
   Cloud Audit Logs to receive early warning of key state changes.
   **Recovery keys cannot reconstruct the encryption key if the Cloud KMS key is
-  destroyed — this is permanent, unrecoverable cluster loss.**
+  destroyed - this is permanent, unrecoverable cluster loss.**
 - For Transit (Vault-to-Vault): keep the unsealer Vault cluster healthy; back up its
   storage.
 - Test your KMS recovery procedure before it is needed in production.
 
 **If the KMS is temporarily unavailable** and all Vault nodes restart, the cluster
 is sealed and cannot be unsealed until the KMS is restored. Vault nodes are
-**read-only** while sealed — no writes or new leases.
+**read-only** while sealed - no writes or new leases.
 
 ---
 
@@ -156,7 +158,7 @@ openssl x509 -in /opt/vault/tls/vault-cert.pem -noout -ext subjectAltName
 regenerate your BYO cert with the correct SANs. For `retry_join` you need:
 - `DNS:{{ vault_tls_leader_servername }}` (e.g. `vault.cluster.internal`)
 - `DNS:{{ inventory_hostname }}` for each node
-- `IP:{{ ansible_default_ipv4.address }}` for each node
+- `IP:{{ ansible_facts['default_ipv4']['address'] }}` for each node
 - `IP:127.0.0.1`
 
 ### `x509: certificate specifies an incompatible key usage`
@@ -222,7 +224,7 @@ immediately after start can cause instability.
 **Cause:** Common causes:
 1. `retry_join` cannot resolve the peer hostname or IP.
 2. TLS SAN mismatch on `leader_tls_servername`.
-3. Nodes started sequentially with long gaps — `retry_join` retries internally but
+3. Nodes started sequentially with long gaps - `retry_join` retries internally but
    may time out if the bootstrap node is not yet ready.
 
 **Diagnosis:**
@@ -293,8 +295,60 @@ Or, for ephemeral/test runs where you accept plaintext storage:
 vault_init_encrypt_output: false
 ```
 
-Regardless of the encryption setting, **never commit the init file** — it contains
+## Validate fails: encryption password file missing or unreadable
+
+**Symptom:** The play fails in validation, before `vault operator init`, at
+"Validate init output encryption password file and output directory".
+
+**Cause:** `vault_init_encrypt_output: true` and
+`vault_init_encrypt_password_file` is set, but the file does not exist or is
+not readable by the controller user, or the directory of
+`vault_init_output_path` cannot be written or created. The role checks this up
+front so a failed encryption can never leave the root token and keys in
+plaintext.
+
+**Fix:** create the password file (or fix its path or permissions) and make
+sure the init output directory or its parent is writable. If an earlier run
+left a plaintext init file behind, the next run with a valid password file
+encrypts it.
+
+Regardless of the encryption setting, **never commit the init file** - it contains
 unseal keys (Shamir) or recovery keys plus the initial root token.
+
+---
+
+## Requests fail: audit device cannot write
+
+**Symptom:** Vault answers requests with errors (HTTP 500, "permission denied"
+or "failed to log request"), while `vault status` still reports the node as
+unsealed.
+
+**Cause:** when audit devices are enabled and none of them can write the
+request (for example the disk under `vault_audit_dir` is full, or the audit log
+was moved away without a reload), Vault refuses to service the request rather
+than skip the audit entry. The role enables a single file audit device, so that
+device is the only one.
+
+**Fix:** free space under `vault_audit_dir` and keep
+`vault_audit_logrotate_enabled: true` (the default) so
+`/etc/logrotate.d/vault-audit` rotates and compresses the log and reloads Vault
+(SIGHUP) to reopen it. When rotating by hand, always run
+`systemctl reload vault` afterwards. Check the setup with
+`logrotate -d /etc/logrotate.d/vault-audit`.
+
+**SELinux (RHEL family, enforcing):** the role's `restorecon` gives the default
+`vault_audit_dir` (`/opt/vault/audit`) the default `/opt` label `usr_t`.
+logrotate runs confined as `logrotate_t` and may be denied renaming and
+creating files with that label, so the audit log is never rotated. After the
+first rotation, check for denials with `ausearch -m avc -c logrotate`. If there
+are any, either keep the audit log under `/var/log` (for example
+`vault_audit_dir: /var/log/vault`, which `restorecon` labels `var_log_t`), or
+label the default directory as a log directory:
+
+```bash
+semanage fcontext -a -t var_log_t '/opt/vault/audit(/.*)?'
+restorecon -R /opt/vault/audit
+```
 
 ---
 

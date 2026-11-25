@@ -1,6 +1,6 @@
 ---
 # Prepare the container before the role runs.
-# Install Python and gather facts; no Vault-specific setup here — the role
+# Install Python and gather facts; no Vault-specific setup here - the role
 # installs Vault itself via the package method.
 
 - name: Prepare default container
@@ -27,3 +27,22 @@
 
     - name: Gather facts after bootstrap
       ansible.builtin.setup:
+
+    # Active and already commented swap entries (and a blank line before one)
+    # for the fstab idempotence check in verify.yml.
+    - name: Write a test /etc/fstab with swap entries
+      ansible.builtin.copy:
+        dest: /etc/fstab
+        content: |
+          # fstab written by molecule prepare
+          UUID=0a1b / ext4 defaults 0 1
+
+          /swapfile none swap sw 0 0
+          UUID=abc swap swap defaults 0 0
+          /swap4 none swap sw
+          #/swapfile2 none swap sw 0 0
+          #UUID=def swap swap defaults 0 0
+            # /swap3 none swap sw 0 0
+        owner: root
+        group: root
+        mode: "0644"

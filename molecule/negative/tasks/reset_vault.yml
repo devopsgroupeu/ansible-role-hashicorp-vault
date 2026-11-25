@@ -1,0 +1,48 @@
+---
+# Reset the node to a fresh, uninitialized Vault and remove the controller init
+# file, so the next case starts from scratch.
+- name: Stop Vault
+  ansible.builtin.systemd:
+    name: vault
+    state: stopped
+
+- name: Remove Raft data
+  ansible.builtin.file:
+    path: /opt/vault/data
+    state: absent
+
+- name: Recreate Raft data directory
+  ansible.builtin.file:
+    path: /opt/vault/data
+    state: directory
+    owner: vault
+    group: vault
+    mode: "0750"
+
+- name: Start Vault
+  ansible.builtin.systemd:
+    name: vault
+    state: started
+
+- name: Wait for an uninitialized Vault
+  ansible.builtin.command: vault status -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:8200"
+    VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+  register: __reset_status
+  changed_when: false
+  until: >-
+    __reset_status['rc'] == 2
+    and not ((__reset_status['stdout'] | from_json)['initialized'] | bool)
+  failed_when: >-
+    not (__reset_status['rc'] == 2
+    and not ((__reset_status['stdout'] | from_json)['initialized'] | bool))
+  retries: 12
+  delay: 5
+
+- name: Remove controller init file
+  ansible.builtin.file:
+    path: /tmp/.vault_init_molecule_negative.json
+    state: absent
+  delegate_to: localhost
+  become: false

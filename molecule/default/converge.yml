@@ -7,6 +7,13 @@
   hosts: all
   become: true
   gather_facts: true
+  # No hardware facts: the container sees the Docker host's swap, and the role
+  # would run swapoff -a on it. Without swaptotal_mb the role skips swapoff but
+  # still manages the swap entries in /etc/fstab (see prepare.yml). network
+  # must be listed: with only negations Ansible gathers the min subset.
+  gather_subset:
+    - "!hardware"
+    - network
   vars:
     # Phase 4: full init+unseal enabled.
     vault_init: true
@@ -17,7 +24,7 @@
     vault_init_key_shares: 1
     vault_init_key_threshold: 1
 
-    # Do not encrypt the init output — ansible-vault is not available
+    # Do not encrypt the init output - ansible-vault is not available
     # unattended in the Molecule environment without a vault password file.
     vault_init_encrypt_output: false
 
@@ -27,8 +34,9 @@
     # mlock cannot be used inside plain Docker containers.
     vault_disable_mlock: true
 
-    # Swap is not configured in containers; suppress swapoff entirely.
-    vault_manage_swap: false
+    # Comment out the active swap entries prepare.yml writes to /etc/fstab.
+    # swapoff is skipped because no hardware facts are gathered (see above).
+    vault_manage_swap: true
 
     # Generate TLS certs via community.crypto so no pre-placed certs are needed.
     vault_tls_generate_certs: true

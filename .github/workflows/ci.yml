@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       run_raft_ha:
-        description: "Run raft-ha scenario (heavy — 3-node cluster)"
+        description: "Run raft-ha scenario (heavy - 3-node cluster)"
         required: false
         default: "false"
         type: choice
@@ -23,43 +23,107 @@ on:
 
 jobs:
   lint:
-    name: lint
+    name: lint / ansible-core ${{ matrix.ansible-core }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # ansible-core 2.22 requires Python >= 3.13. requirements.txt still caps
+      # ansible-core below 2.22; the 2.22 leg installs it on top to prove
+      # compatibility before the cap is widened.
+      matrix:
+        include:
+          - ansible-core: "2.20"
+            python: "3.12"
+          - ansible-core: "2.21"
+            python: "3.12"
+          - ansible-core: "2.22"
+            python: "3.13"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install "ansible-core==${{ matrix.ansible-core }}.*"
       - name: yamllint
         run: yamllint .
       - name: ansible-lint
         run: ansible-lint --profile production .
+      - name: No injected fact variables
+        # Injected top-level facts switch off by default in ansible-core 2.24;
+        # read them from ansible_facts instead.
+        run: "! grep -rnE 'ansible_(architecture|default_ipv4)' tasks defaults templates meta"
+      - name: Docs drift gates
+        # Keep the licence wording, install pins and the documented CI matrix
+        # in line with the code. Each gate is an explicit if: bash -e ignores
+        # the exit status of a command negated with '!'.
+        run: |
+          if grep -rn '(OSS)' README.md docs meta; then
+            echo "Found '(OSS)'; say Community Edition (BUSL 1.1) instead"
+            exit 1
+          fi
+          if grep -rn 'feat/galaxy-readiness-v2' README.md docs; then
+            echo "Found the stale branch name feat/galaxy-readiness-v2"
+            exit 1
+          fi
+          if grep -q rockylinux9 README.md && ! grep -q 'distro: rockylinux9' .github/workflows/ci.yml; then
+            echo "README.md mentions rockylinux9 but ci.yml does not run it"
+            exit 1
+          fi
 
   molecule:
-    name: molecule / ${{ matrix.scenario }} / ${{ matrix.distro }}
+    name: molecule / ${{ matrix.scenario }} / ${{ matrix.distro }}${{ matrix.ansible-core && format(' / ansible-core {0}', matrix.ansible-core) || '' }}
     runs-on: ubuntu-latest
     needs: lint
     strategy:
       fail-fast: false
-      # CI tests the container-reliable matrix (Debian + Ubuntu). EL9 is a
-      # supported platform validated on real hosts — RockyLinux containers have
-      # known sudo/PAM quirks. The heavy raft-ha scenario is workflow_dispatch.
+      # Live scenarios run on Debian + Ubuntu containers. EL9 is rendered on
+      # rockylinux9 only; live EL9 is validated on real hosts (RockyLinux
+      # containers have known sudo/PAM quirks). raft-ha is a separate job.
       matrix:
         include:
-          # render scenario — offline template validation
+          # render scenario - offline template validation
           - scenario: render
             distro: debian12
           - scenario: render
             distro: ubuntu2404
-          # default scenario — full install + init + unseal + audit
+          - scenario: render
+            distro: debian13
+          - scenario: render
+            distro: rockylinux9
+          # render scenario on the other supported ansible-core lines
+          - scenario: render
+            distro: debian12
+            ansible-core: "2.20"
+          - scenario: render
+            distro: debian12
+            ansible-core: "2.22"
+            python: "3.13"
+          # default scenario - full install + init + unseal + audit
           - scenario: default
             distro: debian12
           - scenario: default
+            distro: ubuntu2404
+          - scenario: default
+            distro: debian13
+          # negative scenario - failure paths and fail-closed guards
+          - scenario: negative
+            distro: debian12
+          # tls-disabled scenario - init, unseal and audit over http
+          - scenario: tls-disabled
+            distro: debian12
+          # upgrade scenario - package version change restarts and re-unseals
+          - scenario: upgrade
+            distro: debian12
+          # binary scenario - zip install on clean images, idempotent re-run
+          - scenario: binary
+            distro: debian12
+          - scenario: binary
             distro: ubuntu2404
     steps:
       - name: Checkout
@@ -67,10 +131,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python || '3.12' }}
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          if [ -n "${{ matrix.ansible-core }}" ]; then
+            pip install "ansible-core==${{ matrix.ansible-core }}.*"
+          fi
       - name: Run Molecule scenario
         run: molecule test -s ${{ matrix.scenario }}
         env:
@@ -79,12 +147,20 @@ jobs:
           MOLECULE_DISTRO: ${{ matrix.distro }}
 
   molecule-raft-ha:
-    # Heavy 3-node HA scenario — triggered manually via workflow_dispatch only.
-    # Requires Docker with adequate resources to run 3 systemd containers concurrently.
-    name: molecule / raft-ha
+    # 3-node HA scenario with idempotence and a --limit re-run. Runs on pull
+    # requests to main and on demand via workflow_dispatch.
+    name: molecule / raft-ha / bootstrap ${{ matrix.bootstrap }}
     runs-on: ubuntu-latest
     needs: lint
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_raft_ha == 'true' }}
+    if: >-
+      ${{ (github.event_name == 'pull_request' && github.base_ref == 'main')
+      || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_raft_ha == 'true') }}
+    strategy:
+      fail-fast: false
+      # vault2 as bootstrap node proves delegated tasks use the bootstrap
+      # node's own API address rather than the first host's.
+      matrix:
+        bootstrap: [vault1, vault2]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -101,17 +177,19 @@ jobs:
           PY_COLORS: "1"
           ANSIBLE_FORCE_COLOR: "1"
           MOLECULE_DISTRO: debian12
+          MOLECULE_VAULT_BOOTSTRAP_NODE: ${{ matrix.bootstrap }}
 
   ci-success:
     name: ci-success
     runs-on: ubuntu-latest
-    needs: [lint, molecule]
+    # molecule-raft-ha is skipped on pushes; a skipped job does not fail this.
+    needs: [lint, molecule, molecule-raft-ha]
     if: always()
     steps:
       - name: Fail if any required job did not succeed
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
-          echo "A required CI job (lint or molecule) did not succeed."
+          echo "A required CI job (lint, molecule or molecule-raft-ha) did not succeed."
           exit 1
       - name: Confirm required jobs passed
-        run: echo "lint + molecule succeeded"
+        run: echo "lint + molecule + molecule-raft-ha succeeded (or were skipped)"

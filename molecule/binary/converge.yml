@@ -1,0 +1,32 @@
+---
+# Converge for the binary scenario: GPG-verified zip install on a clean image,
+# then init, unseal and audit like the default scenario.
+
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    vault_install_method: binary
+
+    vault_init: true
+    vault_unseal: true
+    vault_audit_enabled: true
+    vault_init_key_shares: 1
+    vault_init_key_threshold: 1
+    vault_init_encrypt_output: false
+    vault_init_output_path: "/tmp/.vault_init_molecule_binary.json"
+
+    vault_disable_mlock: true
+    vault_manage_swap: false
+    vault_tls_generate_certs: true
+    vault_tls_install_ca_to_trust_store: false
+    vault_api_addr: "https://127.0.0.1:8200"
+    vault_cluster_addr: "https://127.0.0.1:8201"
+    vault_raft_peers:
+      - hashicorp-vault-binary
+
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault

@@ -1,0 +1,35 @@
+---
+# Verify the upgrade scenario: the running Vault reports the target version
+# (not only the binary on disk) and is unsealed.
+
+- name: Verify the upgraded Vault
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    __upgrade_target_version: "2.2.2"
+  tasks:
+    - name: Query the Vault binary version
+      ansible.builtin.command: vault version
+      register: __verify_version_cmd
+      changed_when: false
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __verify_status_cmd
+      changed_when: false
+      failed_when: __verify_status_cmd['rc'] != 0
+
+    - name: Assert the running Vault is the target version and unsealed
+      ansible.builtin.assert:
+        that:
+          - ('v' ~ __upgrade_target_version) in __verify_version_cmd['stdout']
+          - (__verify_status_cmd['stdout'] | from_json)['version'] == __upgrade_target_version
+          - not ((__verify_status_cmd['stdout'] | from_json)['sealed'] | bool)
+        fail_msg: >-
+          Expected Vault {{ __upgrade_target_version }} running and unsealed;
+          binary says '{{ __verify_version_cmd['stdout'] }}', status says
+          {{ __verify_status_cmd['stdout'] }}

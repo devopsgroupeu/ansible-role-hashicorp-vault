@@ -12,7 +12,7 @@
     # Render-only: skip install/service/init
     vault_config_only: true
 
-    # 3-node peer list — produces 2 retry_join blocks (self excluded at runtime)
+    # 3-node peer list - produces 2 retry_join blocks (self excluded at runtime)
     vault_raft_peers:
       - vault-render
       - vault-node-2
@@ -25,7 +25,7 @@
     vault_tls_key_file: /opt/vault/tls/vault-key.pem
     vault_tls_ca_file: /opt/vault/tls/vault-ca.pem
 
-    # Use default tls12/tls13 range — cipher suites must NOT appear
+    # Use default tls12/tls13 range - cipher suites must NOT appear
     vault_tls_min_version: "tls12"
     vault_tls_max_version: "tls13"
 
@@ -33,7 +33,7 @@
     vault_telemetry_enabled: true
     vault_telemetry_unauthenticated_metrics_access: false
 
-    # Use deterministic api_addr / cluster_addr (no ansible_default_ipv4 dependency)
+    # Use deterministic api_addr / cluster_addr (no default_ipv4 fact dependency)
     vault_api_addr: "https://127.0.0.1:8200"
     vault_cluster_addr: "https://127.0.0.1:8201"
 

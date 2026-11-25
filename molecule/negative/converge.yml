@@ -1,0 +1,575 @@
+---
+# Cases for the negative scenario, run in order against one container.
+# Shared role variables live in molecule.yml (inventory group_vars).
+
+# ------------------------------------------------------------------------------
+# Case 0: install and start Vault, but do not initialize it.
+# ------------------------------------------------------------------------------
+- name: Case 0 - install Vault without init
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    vault_init: false
+    vault_unseal: false
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+# ------------------------------------------------------------------------------
+# Case 1: an unreachable Vault API (vault_api_addr on a port nothing listens
+# on) must fail the status probe with the CLI error visible, and must never be
+# read as "not initialized" (which would run vault operator init).
+# ------------------------------------------------------------------------------
+- name: Case 1 - status probe errors fail instead of reading as uninitialized
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: true
+    vault_api_addr: "https://127.0.0.1:18299"
+  tasks:
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although Vault was unreachable"
+      rescue:
+        - name: Assert the status probe failed with readable stderr
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Probe Vault status on every node'
+              - ansible_failed_result['rc'] == 1
+              - ansible_failed_result['stderr'] | length > 0
+              - "'censored' not in ansible_failed_result"
+            fail_msg: "Unexpected failure: {{ ansible_failed_task['name'] }}"
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      until: __case_status['rc'] == 2
+      failed_when: __case_status['rc'] != 2
+      retries: 6
+      delay: 5
+
+    - name: Assert Vault was not initialized
+      ansible.builtin.assert:
+        that:
+          - not ((__case_status['stdout'] | from_json)['initialized'] | bool)
+
+# ------------------------------------------------------------------------------
+# Case 2: vault_unseal=false on a fresh node finishes without waiting for an
+# unseal and leaves Vault initialized and sealed, with the init file saved on
+# the controller. Runs the role in a nested ansible-playbook so the output can
+# be checked for retries of the wait tasks.
+# ------------------------------------------------------------------------------
+- name: Case 2 - vault_unseal false completes and leaves Vault sealed
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run the role with vault_unseal false
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge_role.yml"
+          - --extra-vars
+          - "{{ {'vault_init': true, 'vault_unseal': false} | to_json }}"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      delegate_to: localhost
+      become: false
+      register: __case_nounseal_run
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the run passed and did not wait for an unseal
+      ansible.builtin.assert:
+        that:
+          - __case_nounseal_run['rc'] == 0
+          - >-
+            (__case_nounseal_run['stdout'] ~ __case_nounseal_run['stderr'])
+            is not search('RETRYING: .*: Wait for')
+        fail_msg: "vault_unseal=false run failed or retried a wait task: {{ __case_nounseal_run['stdout_lines'][-20:] }}"
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      failed_when: __case_status['rc'] != 2
+
+    - name: Stat controller init file
+      ansible.builtin.stat:
+        path: /tmp/.vault_init_molecule_negative.json
+      delegate_to: localhost
+      become: false
+      register: __case_init_file
+
+    - name: Assert Vault is initialized, sealed and the init file exists
+      ansible.builtin.assert:
+        that:
+          - (__case_status['stdout'] | from_json)['initialized'] | bool
+          - (__case_status['stdout'] | from_json)['sealed'] | bool
+          - __case_init_file['stat']['exists']
+
+# ------------------------------------------------------------------------------
+# Case 3: a leader that never reaches unsealed must fail the wait gate.
+# Init used threshold 2; submitting only 1 share is accepted by the unseal API
+# but leaves Vault sealed.
+# ------------------------------------------------------------------------------
+- name: Case 3 - never-unsealing leader fails the wait gate
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: true
+    vault_init_key_threshold: 1
+  tasks:
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although the leader stayed sealed"
+      rescue:
+        - name: Assert the leader wait gate failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Wait for leader to report unsealed status (Shamir)'
+            fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
+
+# ------------------------------------------------------------------------------
+# Case 4: a fresh node must not be initialized over an existing
+# controller init file (another cluster's root token and keys).
+# ------------------------------------------------------------------------------
+- name: Case 4 - existing controller init file blocks a fresh init
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: true
+  tasks:
+    - name: Reset to a fresh Vault
+      ansible.builtin.include_tasks: tasks/reset_vault.yml
+
+    - name: Write a dummy init file of another cluster
+      ansible.builtin.copy:
+        content: '{"root_token": "other-cluster", "unseal_keys_hex": []}'
+        dest: /tmp/.vault_init_molecule_negative.json
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Stat the dummy init file
+      ansible.builtin.stat:
+        path: /tmp/.vault_init_molecule_negative.json
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: __case_dummy_before
+
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although an init file already existed"
+      rescue:
+        - name: Assert the init file guard fired
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Refuse to overwrite an existing controller init file'
+            fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      failed_when: __case_status['rc'] != 2
+
+    - name: Stat the dummy init file again
+      ansible.builtin.stat:
+        path: /tmp/.vault_init_molecule_negative.json
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: __case_dummy_after
+
+    - name: Assert Vault stayed uninitialized and the file is untouched
+      ansible.builtin.assert:
+        that:
+          - not ((__case_status['stdout'] | from_json)['initialized'] | bool)
+          - __case_dummy_after['stat']['checksum'] == __case_dummy_before['stat']['checksum']
+
+    - name: Remove the dummy init file
+      ansible.builtin.file:
+        path: /tmp/.vault_init_molecule_negative.json
+        state: absent
+      delegate_to: localhost
+      become: false
+
+# ------------------------------------------------------------------------------
+# Case 5: encryption requested with a missing password file must fail
+# in validate, before init writes any key material.
+# ------------------------------------------------------------------------------
+- name: Case 5 - missing encryption password file fails before init
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: true
+    vault_init_encrypt_output: true
+    vault_init_encrypt_password_file: /tmp/.vault_init_molecule_negative_missing_pass
+  tasks:
+    - name: Reset to a fresh Vault
+      ansible.builtin.include_tasks: tasks/reset_vault.yml
+
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although the password file is missing"
+      rescue:
+        - name: Assert the validate check fired
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Validate init output encryption password file and output directory'
+            fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      failed_when: __case_status['rc'] != 2
+
+    - name: Stat controller init file
+      ansible.builtin.stat:
+        path: /tmp/.vault_init_molecule_negative.json
+      delegate_to: localhost
+      become: false
+      register: __case_init_file
+
+    - name: Assert Vault stayed uninitialized and no init file was written
+      ansible.builtin.assert:
+        that:
+          - not ((__case_status['stdout'] | from_json)['initialized'] | bool)
+          - not __case_init_file['stat']['exists']
+
+# ------------------------------------------------------------------------------
+# Case 6 (positive): with a password file the init file is written
+# ansible-vault encrypted, and a later run with --vault-password-file
+# re-unseals Vault after a restart from that encrypted file.
+# ------------------------------------------------------------------------------
+- name: Case 6 - encrypted init file and re-unseal from it
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    __case_pass_file: /tmp/.vault_init_molecule_negative_pass
+    vault_init: true
+    vault_unseal: true
+    vault_init_encrypt_output: true
+    vault_init_encrypt_password_file: "{{ __case_pass_file }}"
+  tasks:
+    - name: Reset to a fresh Vault
+      ansible.builtin.include_tasks: tasks/reset_vault.yml
+
+    - name: Create a throwaway ansible-vault password file on the controller
+      ansible.builtin.copy:
+        content: "molecule-negative-{{ 999999 | random(seed=inventory_hostname) }}\n"
+        dest: "{{ __case_pass_file }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+    - name: Read the init file header
+      ansible.builtin.command: head -c 14 /tmp/.vault_init_molecule_negative.json
+      delegate_to: localhost
+      become: false
+      register: __case_header
+      changed_when: false
+
+    - name: Assert the init file is ansible-vault encrypted
+      ansible.builtin.assert:
+        that:
+          - __case_header['stdout'] == '$ANSIBLE_VAULT'
+
+    - name: Restart Vault so it comes back sealed
+      ansible.builtin.systemd:
+        name: vault
+        state: restarted
+
+    - name: Re-run the role with the vault password file
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge_role.yml"
+          - --vault-password-file
+          - "{{ __case_pass_file }}"
+          - --extra-vars
+          - "{{ {'vault_init_encrypt_output': true, 'vault_init_encrypt_password_file': __case_pass_file} | to_json }}"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      delegate_to: localhost
+      become: false
+      register: __case_rerun
+      changed_when: false
+      failed_when: __case_rerun['rc'] != 0
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      failed_when: __case_status['rc'] != 0
+
+    - name: Assert Vault is unsealed again
+      ansible.builtin.assert:
+        that:
+          - not ((__case_status['stdout'] | from_json)['sealed'] | bool)
+
+# ------------------------------------------------------------------------------
+# Case 7: the number of PGP keys must match the number of key shares.
+# ------------------------------------------------------------------------------
+- name: Case 7 - PGP key count mismatch fails in validate
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: false
+    vault_init_pgp_keys:
+      - "bm90LWEta2V5"
+      - "bm90LWEta2V5"
+  tasks:
+    - name: Run the role and capture the failure
+      block:
+        - name: Include hashicorp_vault role
+          ansible.builtin.include_role:
+            name: ansible-role-hashicorp-vault
+
+        - name: Fail when the role did not fail
+          ansible.builtin.fail:
+            msg: "The role passed although 2 PGP keys were given for 3 shares"
+      rescue:
+        - name: Assert the PGP key count check fired
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task['name'] == 'Validate vault_init_pgp_keys matches the number of key shares'
+            fail_msg: "Unexpected failed task: {{ ansible_failed_task['name'] }}"
+
+# ------------------------------------------------------------------------------
+# Case 8 (positive): init with a throwaway PGP key. The share in the init
+# file is PGP-encrypted; decrypting it with the test key unseals Vault.
+# ------------------------------------------------------------------------------
+- name: Case 8 - init with PGP keys and unseal with the decrypted share
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: true
+    vault_unseal: false
+    vault_init_key_shares: 1
+    vault_init_key_threshold: 1
+  tasks:
+    - name: Reset to a fresh Vault
+      ansible.builtin.include_tasks: tasks/reset_vault.yml
+
+    - name: Install gnupg
+      ansible.builtin.apt:
+        name: gnupg
+        state: present
+
+    - name: Generate a throwaway PGP key
+      ansible.builtin.command: >-
+        gpg --batch --pinentry-mode loopback --passphrase ''
+        --quick-gen-key 'molecule-negative <molecule@example.invalid>' default default never
+      args:
+        creates: /root/.gnupg/pubring.kbx
+
+    - name: Export the public key as base64
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        gpg --export molecule@example.invalid | base64 -w0
+      args:
+        executable: /bin/bash
+      register: __case_pgp_pub
+      changed_when: false
+
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+      vars:
+        vault_init_pgp_keys:
+          - "{{ __case_pgp_pub['stdout'] }}"
+
+    - name: Read the init file
+      ansible.builtin.slurp:
+        src: /tmp/.vault_init_molecule_negative.json
+      delegate_to: localhost
+      become: false
+      register: __case_init_raw
+      no_log: true
+
+    - name: Decrypt the unseal share with the test key
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        printf '%s' "$SHARE" | base64 -d | gpg --batch -dq > /root/share.bin &&
+        python3 -c "import base64;d=open('/root/share.bin','rb').read().strip();
+        print(d.decode() if d and all(c in b'0123456789abcdef' for c in d) else base64.b64encode(d).decode())"
+      args:
+        executable: /bin/bash
+      environment:
+        SHARE: "{{ (__case_init_raw['content'] | b64decode | from_json)['unseal_keys_b64'][0] }}"
+      register: __case_share
+      changed_when: false
+      no_log: true
+
+    - name: Unseal Vault with the decrypted share
+      ansible.builtin.command: vault operator unseal -format=json {{ __case_share['stdout'] }}
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_unseal
+      changed_when: true
+      no_log: true
+
+    - name: Assert Vault is unsealed
+      ansible.builtin.assert:
+        that:
+          - not ((__case_unseal['stdout'] | from_json)['sealed'] | bool)
+        fail_msg: "Vault is still sealed after unsealing with the decrypted PGP share"
+
+# ------------------------------------------------------------------------------
+# Case 9: vault_service_state stopped with init and unseal off (install-only,
+# e.g. image baking) must pass, skip everything that talks to Vault and leave
+# the service stopped.
+# ------------------------------------------------------------------------------
+- name: Case 9 - stopped service with init and unseal off passes
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    vault_init: false
+    vault_unseal: false
+    vault_service_state: stopped
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert vault.service is stopped
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['services']['vault.service']['state'] == 'stopped'
+        fail_msg: >-
+          vault.service is {{ ansible_facts['services']['vault.service']['state'] }}
+          after a run with vault_service_state stopped
+
+    - name: Start Vault again
+      ansible.builtin.systemd:
+        name: vault
+        state: started
+
+# ------------------------------------------------------------------------------
+# Case 10: a sealed node with vault_unseal true and no init file on this
+# controller must fail and name the init file path, not end green and sealed.
+# Runs the role in a nested ansible-playbook: earlier cases left unseal keys
+# from their own init in this run's host facts.
+# ------------------------------------------------------------------------------
+- name: Case 10 - sealed node without unseal keys fails
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    __case_missing_init_file: /tmp/.vault_init_molecule_negative_moved.json
+  tasks:
+    - name: Restart Vault so it comes back sealed
+      ansible.builtin.systemd:
+        name: vault
+        state: restarted
+
+    - name: Run the role without an init file on the controller
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - --inventory
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_INVENTORY_FILE') | dirname }}"
+          - "{{ lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY') }}/converge_role.yml"
+          - --extra-vars
+          - "{{ {'vault_init': true, 'vault_unseal': true, 'vault_init_output_path': __case_missing_init_file} | to_json }}"
+      environment:
+        ANSIBLE_NOCOLOR: "1"
+        ANSIBLE_FORCE_COLOR: "0"
+      delegate_to: localhost
+      become: false
+      register: __case_nokeys_run
+      changed_when: false
+      failed_when: false
+
+    - name: Query Vault status
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __case_status
+      changed_when: false
+      failed_when: __case_status['rc'] != 2
+
+    - name: Assert the missing keys check fired, named the init file and Vault stayed sealed
+      ansible.builtin.assert:
+        that:
+          - __case_nokeys_run['rc'] != 0
+          - __case_nokeys_output is search('Fail when a sealed node has no unseal keys')
+          - __case_nokeys_output is search(__case_missing_init_file)
+          - (__case_status['stdout'] | from_json)['sealed'] | bool
+        fail_msg: "Unexpected result without unseal keys: {{ __case_nokeys_run['stdout_lines'][-20:] }}"
+      vars:
+        __case_nokeys_output: "{{ __case_nokeys_run['stdout'] ~ __case_nokeys_run['stderr'] }}"

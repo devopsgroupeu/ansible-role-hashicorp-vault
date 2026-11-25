@@ -59,6 +59,11 @@
     update_cache: true
     allow_downgrade: true
   when: ansible_facts['os_family'] == 'Debian'
+  # A version change replaces the binary on disk only; restart so the new
+  # version actually runs (init_unseal.yml re-unseals it in the same run).
+  notify:
+    - reload systemd daemon
+    - restart vault
 
 # --- RHEL / EL ----------------------------------------------------------------
 
@@ -80,7 +85,7 @@
   when: ansible_facts['os_family'] == 'RedHat'
 
 # DNF supports version pinning via the name-version-release format.
-# Use vault_version directly; packaging epochs differ — omit them and rely on
+# Use vault_version directly; packaging epochs differ - omit them and rely on
 # exact version match. Falls back to latest in the locked major if pin fails.
 - name: Install Vault package (RHEL/EL, exact version pin)
   ansible.builtin.dnf:
@@ -88,3 +93,7 @@
     state: present
     allow_downgrade: true
   when: ansible_facts['os_family'] == 'RedHat'
+  # See the Debian task above: restart so the new version actually runs.
+  notify:
+    - reload systemd daemon
+    - restart vault

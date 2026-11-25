@@ -1,0 +1,17 @@
+# Managed by Ansible - do not edit manually.
+# Rotates the Vault file audit device log. Vault keeps the file open, so
+# postrotate reloads vault.service (ExecReload sends SIGHUP to the main
+# process only), which makes Vault reopen the file.
+
+{{ vault_audit_file_path }} {
+    {{ vault_audit_logrotate_frequency }}
+    rotate {{ vault_audit_logrotate_rotate }}
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0600 {{ vault_user }} {{ vault_group }}
+    postrotate
+        systemctl reload vault.service >/dev/null 2>&1 || true
+    endscript
+}

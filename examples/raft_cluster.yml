@@ -1,5 +1,5 @@
 ---
-# Three-node Raft cluster deployment — production with BYO TLS certificates.
+# Three-node Raft cluster deployment - production with BYO TLS certificates.
 #
 # Inventory (examples/inventory/vault_cluster.yml or equivalent):
 #   all:
@@ -42,7 +42,7 @@
   roles:
     - role: devopsgroupeu.hashicorp-vault
       vars:
-        # ---- TLS (BYO — production default) ------------------------------------
+        # ---- TLS (BYO - production default) ------------------------------------
         vault_tls_generate_certs: false
         vault_tls_cert_file: "/opt/vault/tls/vault-cert.pem"
         vault_tls_key_file: "/opt/vault/tls/vault-key.pem"
@@ -50,7 +50,7 @@
         vault_tls_leader_servername: "vault.cluster.internal"
 
         # ---- Raft ---------------------------------------------------------------
-        # vault_raft_peers defaults to groups['vault'] — no override needed when
+        # vault_raft_peers defaults to groups['vault'] - no override needed when
         # the inventory group 'vault' contains exactly the 3 nodes above.
 
         # ---- Init / unseal ------------------------------------------------------
@@ -61,7 +61,7 @@
         vault_init_encrypt_password_file: "~/.vault-pass"
 
         # ---- Addressing ---------------------------------------------------------
-        # api_addr and cluster_addr are templated from ansible_default_ipv4.address
+        # api_addr and cluster_addr are templated from ansible_facts['default_ipv4']['address']
         # by default; override per-host in host_vars or group_vars if needed.
 
         # ---- Hardening ----------------------------------------------------------

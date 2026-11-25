@@ -1,0 +1,31 @@
+---
+# Converge for the tls-disabled scenario: full install, init, unseal and audit
+# with TLS off. vault_api_addr and vault_cluster_addr keep their defaults so
+# the http scheme is derived from vault_tls_enabled.
+
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    vault_tls_enabled: false
+    # Left at its default (true) on purpose: it must be skipped with TLS off.
+    # vault_tls_install_ca_to_trust_store: true
+
+    vault_init: true
+    vault_unseal: true
+    vault_audit_enabled: true
+    vault_init_key_shares: 1
+    vault_init_key_threshold: 1
+    vault_init_encrypt_output: false
+    vault_init_output_path: "/tmp/.vault_init_molecule_tls_disabled.json"
+
+    vault_disable_mlock: true
+    vault_manage_swap: false
+    vault_raft_peers:
+      - hashicorp-vault-tls-disabled
+
+  tasks:
+    - name: Include hashicorp_vault role
+      ansible.builtin.include_role:
+        name: ansible-role-hashicorp-vault

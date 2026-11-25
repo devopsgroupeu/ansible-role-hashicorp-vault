@@ -38,6 +38,32 @@
         fail_msg: "/etc/vault.d/vault.hcl not found"
         success_msg: "/etc/vault.d/vault.hcl exists"
 
+    # --- fstab swap entries --------------------------------------------------
+    # Active entries are commented once; already commented lines are untouched
+    # (idempotence covers the second run).
+
+    - name: Slurp /etc/fstab
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: __verify_fstab
+
+    - name: Assert only the active swap entries were commented out
+      ansible.builtin.assert:
+        that:
+          - (__verify_fstab['content'] | b64decode) == __verify_fstab_expected
+        fail_msg: "Unexpected /etc/fstab: {{ __verify_fstab['content'] | b64decode }}"
+      vars:
+        __verify_fstab_expected: |
+          # fstab written by molecule prepare
+          UUID=0a1b / ext4 defaults 0 1
+
+          # /swapfile none swap sw 0 0
+          # UUID=abc swap swap defaults 0 0
+          # /swap4 none swap sw
+          #/swapfile2 none swap sw 0 0
+          #UUID=def swap swap defaults 0 0
+            # /swap3 none swap sw 0 0
+
     # --- Vault status: initialized + unsealed + raft --------------------------
 
     - name: Wait for Vault TLS listener to become ready
@@ -55,7 +81,8 @@
         VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
       register: __verify_vault_status_cmd
       changed_when: false
-      failed_when: __verify_vault_status_cmd['rc'] not in [0, 2]
+      # Mirror until: failed_when overrides the failure from exhausted retries.
+      failed_when: __verify_vault_status_cmd['rc'] != 0
       retries: 6
       delay: 5
       until: __verify_vault_status_cmd['rc'] == 0
@@ -146,6 +173,74 @@
         fail_msg: "Vault audit log {{ __verify_vault_audit_log }} not found"
         success_msg: "Vault audit log exists"
 
+    # --- Audit log rotation ---------------------------------------------------
+
+    - name: Stat the audit logrotate config
+      ansible.builtin.stat:
+        path: /etc/logrotate.d/vault-audit
+      register: __verify_logrotate_conf
+
+    - name: Assert the audit logrotate config exists
+      ansible.builtin.assert:
+        that: __verify_logrotate_conf['stat']['exists']
+        fail_msg: "/etc/logrotate.d/vault-audit not found"
+
+    - name: Dry-run logrotate on the audit config
+      ansible.builtin.command: logrotate -d /etc/logrotate.d/vault-audit
+      changed_when: false
+
+    - name: Force a rotation of the audit log
+      ansible.builtin.command: logrotate -f /etc/logrotate.d/vault-audit
+      changed_when: true
+
+    - name: Query Vault status after rotation
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+      register: __verify_rotate_status
+      changed_when: false
+      until: __verify_rotate_status['rc'] == 0
+      failed_when: __verify_rotate_status['rc'] != 0
+      retries: 6
+      delay: 2
+
+    # Vault reopens the file on SIGHUP asynchronously, so repeat the request
+    # until it shows up in the new (non-empty) audit log.
+    - name: Wait until an authenticated request lands in the new audit log
+      ansible.builtin.shell: >-
+        vault token lookup -format=json >/dev/null
+        && test -s {{ __verify_vault_audit_log }}
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
+        VAULT_TOKEN: "{{ __verify_root_token }}"
+      register: __verify_audit_write
+      changed_when: false
+      until: __verify_audit_write['rc'] == 0
+      failed_when: __verify_audit_write['rc'] != 0
+      retries: 10
+      delay: 2
+      no_log: true
+
+    - name: Stat the new audit log
+      ansible.builtin.stat:
+        path: "{{ __verify_vault_audit_log }}"
+      register: __verify_new_audit_log
+
+    - name: Stat the rotated audit log
+      ansible.builtin.stat:
+        path: "{{ __verify_vault_audit_log }}.1"
+      register: __verify_rotated_audit_log
+
+    - name: Assert the log was rotated and Vault writes the new file
+      ansible.builtin.assert:
+        that:
+          - __verify_rotated_audit_log['stat']['exists']
+          - __verify_new_audit_log['stat']['pw_name'] == 'vault'
+          - __verify_new_audit_log['stat']['mode'] == '0600'
+        fail_msg: "Audit log was not rotated, or the new file has the wrong owner or mode"
+
     # --- Vault binary sanity check -------------------------------------------
 
     - name: Assert Vault binary returns version string
@@ -159,3 +254,18 @@
           - "'Vault' in __verify_vault_version['stdout']"
         fail_msg: "Vault binary not working or missing version output"
         success_msg: "Vault binary is functional"
+
+    - name: Assert the binary and the running Vault are the role default version
+      ansible.builtin.assert:
+        that:
+          - ('v' ~ __verify_default_version) in __verify_vault_version['stdout']
+          - __verify_vault_status['version'] == __verify_default_version
+        fail_msg: >-
+          Expected Vault {{ __verify_default_version }} (role default); binary
+          says '{{ __verify_vault_version['stdout'] }}', status says
+          {{ __verify_vault_status['version'] }}.
+      vars:
+        __verify_default_version: >-
+          {{ (lookup('ansible.builtin.file',
+              lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') ~ '/defaults/main.yml')
+              | from_yaml)['vault_version'] }}

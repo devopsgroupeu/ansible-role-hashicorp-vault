@@ -1,0 +1,41 @@
+---
+# Verify the binary scenario: /usr/local/bin/vault is the role's default
+# vault_version, the service is active and Vault is unsealed.
+
+- name: Verify the binary install
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    __verify_vault_version: >-
+      {{ (lookup('ansible.builtin.file',
+          lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') ~ '/defaults/main.yml')
+          | from_yaml)['vault_version'] }}
+  tasks:
+    - name: Query the installed binary version
+      ansible.builtin.command: /usr/local/bin/vault version
+      register: __verify_version_cmd
+      changed_when: false
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Query Vault status
+      ansible.builtin.command: /usr/local/bin/vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_CACERT: /opt/vault/tls/vault-ca.pem
+      register: __verify_status_cmd
+      changed_when: false
+      failed_when: __verify_status_cmd['rc'] != 0
+
+    - name: Assert the binary version, service state and seal state
+      ansible.builtin.assert:
+        that:
+          - ('v' ~ __verify_vault_version) in __verify_version_cmd['stdout']
+          - ansible_facts['services']['vault.service']['state'] == 'running'
+          - (__verify_status_cmd['stdout'] | from_json)['version'] == __verify_vault_version
+          - not ((__verify_status_cmd['stdout'] | from_json)['sealed'] | bool)
+        fail_msg: >-
+          Expected Vault {{ __verify_vault_version }} running and unsealed from
+          /usr/local/bin/vault; got '{{ __verify_version_cmd['stdout'] }}'.

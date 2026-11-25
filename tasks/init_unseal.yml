@@ -5,32 +5,68 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 1. Status probe — run on every node
+# 0. Resolve the bootstrap node's API address.
+#    Tasks delegated to the bootstrap node with run_once are templated with the
+#    variables of the first host in the batch, not the delegate. Record every
+#    node's own vault_api_addr, then pick the bootstrap node's value for
+#    VAULT_ADDR in every delegated task. When the bootstrap node is outside
+#    this batch (--limit/serial), fall back to its inventory vault_api_addr.
+# ------------------------------------------------------------------------------
+
+- name: Record the API address of every node
+  ansible.builtin.set_fact:
+    __vault_api_addr_resolved: "{{ vault_api_addr }}"
+  tags: init_unseal
+
+- name: Resolve the bootstrap node API address for delegated tasks
+  ansible.builtin.set_fact:
+    __vault_bootstrap_api_addr: >-
+      {{ hostvars[vault_init_bootstrap_node]['__vault_api_addr_resolved']
+         | default(hostvars[vault_init_bootstrap_node]['vault_api_addr'] | default(vault_api_addr)) }}
+  tags: init_unseal
+
+# One CLI environment for this node and one for tasks delegated to the
+# bootstrap node. VAULT_CACERT is only set when TLS is on: with
+# vault_tls_enabled false the CA file does not exist and the CLI would fail
+# loading it.
+- name: Build the Vault CLI environment
+  ansible.builtin.set_fact:
+    __vault_cli_env: "{{ {'VAULT_ADDR': vault_api_addr} | combine(__vault_cli_tls_env) }}"
+    __vault_bootstrap_cli_env: "{{ {'VAULT_ADDR': __vault_bootstrap_api_addr} | combine(__vault_cli_tls_env) }}"
+  vars:
+    __vault_cli_tls_env: "{{ {'VAULT_CACERT': vault_tls_ca_file} if vault_tls_enabled | bool else {} }}"
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
+# 1. Status probe - run on every node
 #    Vault 2.x exit codes: 0 = unsealed, 1 = error/unreachable, 2 = sealed.
 #    Both rc=0 and rc=2 produce valid JSON stdout; rc=1 produces no usable JSON.
-#    failed_when allows [0,1,2]; changed_when is always false.
-#    Parse JSON fields (.initialized / .sealed) — never branch on rc alone.
+#    rc=1 (connection, TLS or CA error, or a service that is still starting) is
+#    retried briefly and then fails with the CLI stderr visible: it must never
+#    be read as "not initialized", or init would run against a live cluster.
+#    vault status output carries no secrets, so these probes are not no_log.
+#    Parse JSON fields (.initialized / .sealed) - never branch on rc alone.
 # ------------------------------------------------------------------------------
 
 - name: Probe Vault status on every node
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_status_cmd
+  check_mode: false
   changed_when: false
-  failed_when: __vault_status_cmd['rc'] not in [0, 1, 2]
+  # failed_when mirrors until so exhausted retries fail the task.
+  until: >-
+    __vault_status_cmd['rc'] in [0, 2] and __vault_status_cmd['stdout'] | length > 0
+  failed_when: >-
+    not (__vault_status_cmd['rc'] in [0, 2] and __vault_status_cmd['stdout'] | length > 0)
+  retries: 6
+  delay: 5
   tags: init_unseal
 
 - name: Parse Vault status JSON
   ansible.builtin.set_fact:
-    __vault_status: >-
-      {%- if __vault_status_cmd['rc'] in [0, 2] and __vault_status_cmd['stdout'] | length > 0 -%}
-        {{ __vault_status_cmd['stdout'] | from_json }}
-      {%- else -%}
-        {{ {'initialized': false, 'sealed': true} }}
-      {%- endif -%}
+    __vault_status: "{{ __vault_status_cmd['stdout'] | from_json }}"
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -42,72 +78,136 @@
 - name: Probe Vault status on bootstrap node
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_bootstrap_cli_env }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_bootstrap_status_cmd
+  check_mode: false
   changed_when: false
-  failed_when: __vault_bootstrap_status_cmd['rc'] not in [0, 1, 2]
+  # Only rc 0/2 with JSON may drive the init decision (see section 1).
+  until: >-
+    __vault_bootstrap_status_cmd['rc'] in [0, 2] and __vault_bootstrap_status_cmd['stdout'] | length > 0
+  failed_when: >-
+    not (__vault_bootstrap_status_cmd['rc'] in [0, 2] and __vault_bootstrap_status_cmd['stdout'] | length > 0)
+  retries: 6
+  delay: 5
   tags: init_unseal
 
 - name: Parse bootstrap node Vault status JSON
   ansible.builtin.set_fact:
-    __vault_bootstrap_status: >-
-      {%- if __vault_bootstrap_status_cmd['rc'] in [0, 2] and __vault_bootstrap_status_cmd['stdout'] | length > 0 -%}
-        {{ __vault_bootstrap_status_cmd['stdout'] | from_json }}
-      {%- else -%}
-        {{ {'initialized': false, 'sealed': true} }}
-      {%- endif -%}
+    __vault_bootstrap_status: "{{ __vault_bootstrap_status_cmd['stdout'] | from_json }}"
   run_once: true
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
-# 3. Initialize Vault — bootstrap node only, only when not yet initialized
+# 3. Initialize Vault - bootstrap node only, only when not yet initialized
+#    Never initialize over an existing controller init file: it belongs to
+#    another cluster that shares vault_cluster_id (e.g. same first hostname) or
+#    to a previous incarnation of this one, and overwriting it would destroy its
+#    root token and unseal keys.
 # ------------------------------------------------------------------------------
 
-- name: Initialize Vault (bootstrap node, Shamir)
-  ansible.builtin.command: >-
-    {{ vault_bin_path }} operator init
-    -format=json
-    -key-shares={{ vault_init_key_shares }}
-    -key-threshold={{ vault_init_key_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
-    -pgp-keys={{ vault_init_pgp_keys | join(',') }}{%- endif %}
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-  delegate_to: "{{ vault_init_bootstrap_node }}"
+- name: Stat controller init file before init
+  ansible.builtin.stat:
+    path: "{{ vault_init_output_path }}"
+  delegate_to: localhost
+  become: false
   run_once: true
-  register: __vault_init_shamir_result
-  changed_when: true
-  no_log: true
+  register: __vault_init_file_preinit
   when:
     - vault_init | bool
-    - vault_seal_type == 'shamir'
     - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
   tags: init_unseal
 
-- name: Initialize Vault (bootstrap node, auto-unseal recovery keys)
-  ansible.builtin.command: >-
-    {{ vault_bin_path }} operator init
-    -format=json
-    -recovery-shares={{ vault_init_recovery_shares }}
-    -recovery-threshold={{ vault_init_recovery_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
-    -pgp-keys={{ vault_init_pgp_keys | join(',') }}{%- endif %}
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-  delegate_to: "{{ vault_init_bootstrap_node }}"
+- name: Refuse to overwrite an existing controller init file
+  ansible.builtin.fail:
+    msg: >-
+      init file exists for another or previous cluster; move it or set
+      vault_cluster_id. {{ vault_init_output_path }} already exists on the
+      controller but {{ vault_init_bootstrap_node }} reports
+      initialized=false, so vault operator init would overwrite the root token
+      and keys it holds. Move the file away (or set vault_cluster_id /
+      vault_init_output_path to a unique value for this cluster) and re-run.
   run_once: true
-  register: __vault_init_autounseal_result
-  changed_when: true
-  no_log: true
   when:
     - vault_init | bool
-    - vault_seal_type != 'shamir'
     - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
+    - __vault_init_file_preinit['stat']['exists'] | default(false) | bool
   tags: init_unseal
+
+# vault operator init takes -pgp-keys / -recovery-pgp-keys as comma-separated
+# PATHS to files holding the public keys (or keybase:<user>), not inline key
+# data. Write each key to a private temp dir on the bootstrap node and always
+# remove it afterwards. Vault reads a file that holds a base64 or an
+# ASCII-armored key, so the configured base64 string is written as is.
+- name: Initialize Vault on the bootstrap node
+  when:
+    - vault_init | bool
+    - not (__vault_bootstrap_status['initialized'] | default(false) | bool)
+    - not ansible_check_mode
+  tags: init_unseal
+  block:
+    - name: Create a temporary directory for PGP public keys (bootstrap node)
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: .vault-pgp
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      register: __vault_pgp_tmpdir
+      when: vault_init_pgp_keys | length > 0
+
+    - name: Write PGP public keys to files (bootstrap node)
+      ansible.builtin.copy:
+        content: "{{ item }}"
+        dest: "{{ __vault_pgp_tmpdir['path'] }}/key{{ __vault_pgp_key_idx }}.pub"
+        mode: "0600"
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      loop: "{{ vault_init_pgp_keys }}"
+      loop_control:
+        index_var: __vault_pgp_key_idx
+        label: "key{{ __vault_pgp_key_idx }}.pub"
+      register: __vault_pgp_key_files
+      when: vault_init_pgp_keys | length > 0
+
+    - name: Initialize Vault (bootstrap node, Shamir)
+      ansible.builtin.command: >-
+        {{ vault_bin_path }} operator init
+        -format=json
+        -key-shares={{ vault_init_key_shares }}
+        -key-threshold={{ vault_init_key_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
+        -pgp-keys={{ __vault_pgp_key_files['results'] | map(attribute='dest') | join(',') }}{%- endif %}
+      environment: "{{ __vault_bootstrap_cli_env }}"
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      register: __vault_init_shamir_result
+      changed_when: true
+      no_log: true
+      when: vault_seal_type == 'shamir'
+
+    - name: Initialize Vault (bootstrap node, auto-unseal recovery keys)
+      ansible.builtin.command: >-
+        {{ vault_bin_path }} operator init
+        -format=json
+        -recovery-shares={{ vault_init_recovery_shares }}
+        -recovery-threshold={{ vault_init_recovery_threshold }}{%- if vault_init_pgp_keys | length > 0 %}
+        -recovery-pgp-keys={{ __vault_pgp_key_files['results'] | map(attribute='dest') | join(',') }}{%- endif %}
+      environment: "{{ __vault_bootstrap_cli_env }}"
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      register: __vault_init_autounseal_result
+      changed_when: true
+      no_log: true
+      when: vault_seal_type != 'shamir'
+
+  always:
+    - name: Remove the temporary PGP key directory (bootstrap node)
+      ansible.builtin.file:
+        path: "{{ __vault_pgp_tmpdir['path'] }}"
+        state: absent
+      delegate_to: "{{ vault_init_bootstrap_node }}"
+      run_once: true
+      when: __vault_pgp_tmpdir['path'] is defined
 
 # ------------------------------------------------------------------------------
 # 4. Parse init JSON → extract keys + root_token
@@ -185,7 +285,7 @@
 # 5. Persist init JSON to the Ansible controller (never to a target host)
 #    Written to vault_init_output_path with mode 0600.
 #    Optionally ansible-vault encrypted (when vault_init_encrypt_output=true
-#    AND vault_init_encrypt_password_file is set).
+#    AND vault_init_encrypt_password_file is set); see section 5c.
 # ------------------------------------------------------------------------------
 
 - name: Fail when init encryption requested but no password file is set
@@ -218,7 +318,7 @@
   tags: init_unseal
 
 # Only create (and lock down to 0700) the directory when it does not already
-# exist. Never chmod a pre-existing parent — it may be a shared system dir such
+# exist. Never chmod a pre-existing parent - it may be a shared system dir such
 # as /tmp that the controller user cannot (and must not) restrict. The init
 # file itself is always written 0600 below.
 - name: Ensure controller init output directory exists (mode 0700)
@@ -239,48 +339,14 @@
     content: "{{ __vault_init_json | to_nice_json }}"
     dest: "{{ vault_init_output_path }}"
     mode: "0600"
+    # Second line of defence behind the pre-init guard above.
+    backup: true
   delegate_to: localhost
   become: false
   run_once: true
   no_log: true
   when:
     - __vault_init_json is defined
-  tags: init_unseal
-
-# Check whether the init file is already ansible-vault encrypted (starts with
-# $ANSIBLE_VAULT) to make the encrypt step idempotent on re-runs.
-- name: Read first bytes of init file to detect existing encryption
-  ansible.builtin.command: >-
-    head -c 14 {{ vault_init_output_path }}
-  delegate_to: localhost
-  become: false
-  run_once: true
-  register: __vault_init_file_header
-  changed_when: false
-  no_log: true
-  when:
-    - __vault_init_json is defined
-    - vault_init_encrypt_output | bool
-    - vault_init_encrypt_password_file | length > 0
-  tags: init_unseal
-
-- name: Encrypt init JSON with ansible-vault on controller
-  ansible.builtin.command: >-
-    ansible-vault encrypt
-    --vault-password-file {{ vault_init_encrypt_password_file }}
-    {{ vault_init_output_path }}
-  delegate_to: localhost
-  become: false
-  run_once: true
-  register: __vault_encrypt_result
-  changed_when: __vault_encrypt_result['rc'] == 0
-  failed_when: __vault_encrypt_result['rc'] != 0
-  no_log: true
-  when:
-    - __vault_init_json is defined
-    - vault_init_encrypt_output | bool
-    - vault_init_encrypt_password_file | length > 0
-    - __vault_init_file_header['stdout'] | default('') != '$ANSIBLE_VAULT'
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -294,10 +360,9 @@
 - name: Re-probe Vault status on every node after init
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_status_post_init_cmd
+  check_mode: false
   changed_when: false
   failed_when: __vault_status_post_init_cmd['rc'] not in [0, 1, 2]
   tags: init_unseal
@@ -313,7 +378,7 @@
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
-# 5b. Self-heal / steady-state reconcile — load saved init data from controller
+# 5b. Self-heal / steady-state reconcile - load saved init data from controller
 #     when this run did NOT perform a fresh init but the init file exists.
 #     Enables re-unseal and audit/raft reconcile on every subsequent run.
 #     The file lookup auto-decrypts ansible-vault-encrypted files when the play
@@ -377,7 +442,86 @@
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
-# 6. Unseal — Shamir only. ORDERED for Ansible's default linear strategy: every
+# 5c. Encrypt the controller init file with ansible-vault. Runs whenever
+#     encryption is requested and the file exists, not only after a fresh
+#     init, so a plaintext file left by an earlier failed run gets encrypted on
+#     the next run. It runs after the self-heal load above so that load can
+#     still read such a plaintext file in this run.
+#     The header check ($ANSIBLE_VAULT) keeps the step idempotent.
+# ------------------------------------------------------------------------------
+
+- name: Stat controller init file before encryption
+  ansible.builtin.stat:
+    path: "{{ vault_init_output_path }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_init_file_enc_stat
+  when:
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+  tags: init_unseal
+
+- name: Read first bytes of init file to detect existing encryption
+  ansible.builtin.command: >-
+    head -c 14 {{ vault_init_output_path }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_init_file_header
+  check_mode: false
+  changed_when: false
+  no_log: true
+  when:
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+    - __vault_init_file_enc_stat['stat']['exists'] | default(false) | bool
+  tags: init_unseal
+
+- name: Encrypt init JSON with ansible-vault on controller
+  ansible.builtin.command: >-
+    ansible-vault encrypt
+    --vault-password-file {{ vault_init_encrypt_password_file }}
+    {{ vault_init_output_path }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: __vault_encrypt_result
+  changed_when: __vault_encrypt_result['rc'] == 0
+  failed_when: __vault_encrypt_result['rc'] != 0
+  no_log: true
+  when:
+    - vault_init_encrypt_output | bool
+    - vault_init_encrypt_password_file | length > 0
+    - __vault_init_file_enc_stat['stat']['exists'] | default(false) | bool
+    - __vault_init_file_header['stdout'] | default('') != '$ANSIBLE_VAULT'
+    - not ansible_check_mode
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
+# 5d. A sealed Shamir node this run should unseal needs the unseal keys, from
+#     this run's init or from the controller init file. Without them every
+#     unseal and wait task skips and the run ends green with Vault sealed.
+# ------------------------------------------------------------------------------
+
+- name: Fail when a sealed node has no unseal keys
+  ansible.builtin.fail:
+    msg: >-
+      Vault on {{ inventory_hostname }} is initialized and sealed and
+      vault_unseal is true, but no unseal keys are available: the init file
+      {{ vault_init_output_path }} was not found on this controller. Put the
+      init file at that path (or point vault_init_output_path at it), or
+      unseal Vault manually and set vault_unseal to false.
+  when:
+    - vault_unseal | bool
+    - vault_seal_type == 'shamir'
+    - __vault_status['initialized'] | default(false) | bool
+    - __vault_status['sealed'] | default(true) | bool
+    - __vault_unseal_keys is not defined
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
+# 6. Unseal - Shamir only. ORDERED for Ansible's default linear strategy: every
 #    task completes across the whole batch before the next begins, so the LEADER
 #    MUST be unsealed and active before followers can join/initialize via Raft.
 #
@@ -385,7 +529,7 @@
 #      (b) Unseal the LEADER (bootstrap, initialized+sealed right after init).
 #      (c) Wait for the LEADER to become active/unsealed.
 #      (d) Wait for FOLLOWERS to become initialized via Raft join (only possible
-#          once the leader is active) — then re-probe their status.
+#          once the leader is active) - then re-probe their status.
 #      (e) Unseal the FOLLOWERS (initialized+sealed after join).
 #
 #    Single-node deployments have no followers, so steps (d)/(e) skip and only
@@ -403,7 +547,7 @@
     body:
       key: "{{ item }}"
     validate_certs: true
-    ca_path: "{{ vault_tls_ca_file }}"
+    ca_path: "{{ vault_tls_ca_file if vault_tls_enabled | bool else omit }}"
     status_code:
       - 200
   no_log: true
@@ -418,6 +562,7 @@
     - __vault_status['initialized'] | default(false) | bool
     - __vault_status['sealed'] | default(true) | bool
     - __vault_unseal_keys is defined
+    - not ansible_check_mode
   tags: init_unseal
 
 # (c) Wait for the leader to report active/unsealed before followers attempt to
@@ -425,12 +570,16 @@
 - name: Wait for leader to report unsealed status (Shamir)
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_leader_unseal_probe
   changed_when: false
-  failed_when: __vault_leader_unseal_probe['rc'] not in [0, 1, 2]
+  # failed_when mirrors until: when failed_when is set it overrides the failure
+  # Ansible records on exhausted retries, so a plain 'rc not in [0, 1, 2]' would
+  # let a still-sealed leader pass as ok.
+  failed_when: >-
+    not (__vault_leader_unseal_probe['rc'] == 0 and
+    __vault_leader_unseal_probe['stdout'] | length > 0 and
+    not (__vault_leader_unseal_probe['stdout'] | from_json)['sealed'] | default(true) | bool)
   until: >-
     __vault_leader_unseal_probe['rc'] == 0 and
     __vault_leader_unseal_probe['stdout'] | length > 0 and
@@ -440,8 +589,9 @@
   when:
     - vault_seal_type == 'shamir'
     - inventory_hostname == vault_init_bootstrap_node
-    - vault_init | bool or vault_unseal | bool
+    - vault_unseal | bool
     - __vault_unseal_keys is defined
+    - not ansible_check_mode
   tags: init_unseal
 
 # (d) Wait for follower nodes to become initialized via Raft join.
@@ -454,12 +604,14 @@
 - name: Wait for follower to become initialized via Raft join
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_follower_init_probe
   changed_when: false
-  failed_when: __vault_follower_init_probe['rc'] not in [0, 1, 2]
+  # failed_when mirrors until (see the leader wait). An initialized follower is
+  # still sealed here (rc=2), so failing on rc alone would be wrong.
+  failed_when: >-
+    not (__vault_follower_init_probe['stdout'] | length > 0
+    and (__vault_follower_init_probe['stdout'] | from_json).get('initialized', false) | bool)
   retries: 30
   delay: 10
   until: >-
@@ -470,6 +622,7 @@
     - vault_unseal | bool
     - inventory_hostname != vault_init_bootstrap_node
     - not (__vault_status.get('initialized', false) | bool)
+    - not ansible_check_mode
   tags: init_unseal
 
 # (e) Re-probe follower status (now initialized+sealed) then unseal followers.
@@ -493,7 +646,7 @@
     body:
       key: "{{ item }}"
     validate_certs: true
-    ca_path: "{{ vault_tls_ca_file }}"
+    ca_path: "{{ vault_tls_ca_file if vault_tls_enabled | bool else omit }}"
     status_code:
       - 200
   no_log: true
@@ -508,6 +661,7 @@
     - __vault_status['initialized'] | default(false) | bool
     - __vault_status['sealed'] | default(true) | bool
     - __vault_unseal_keys is defined
+    - not ansible_check_mode
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
@@ -519,12 +673,14 @@
 - name: Wait for Vault to report unsealed status
   ansible.builtin.command: >-
     {{ vault_bin_path }} status -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
+  environment: "{{ __vault_cli_env }}"
   register: __vault_post_unseal_cmd
   changed_when: false
-  failed_when: __vault_post_unseal_cmd['rc'] not in [0, 1, 2]
+  # failed_when mirrors until (see the leader wait).
+  failed_when: >-
+    not (__vault_post_unseal_cmd['rc'] == 0 and
+    __vault_post_unseal_cmd['stdout'] | length > 0 and
+    not (__vault_post_unseal_cmd['stdout'] | from_json)['sealed'] | default(true) | bool)
   until: >-
     __vault_post_unseal_cmd['rc'] == 0 and
     __vault_post_unseal_cmd['stdout'] | length > 0 and
@@ -534,36 +690,147 @@
   # almost immediately; real-world multi-node succeeds well within this window.
   retries: 24
   delay: 5
+  # Shamir: only wait when this run was asked to unseal. Auto-unseal: the seal
+  # provider unseals on startup, so wait whenever init or unseal is enabled.
+  when: >-
+    not ansible_check_mode and (
+    (vault_seal_type == 'shamir' and vault_unseal | bool and __vault_unseal_keys is defined)
+    or (vault_seal_type != 'shamir' and (vault_init | bool or vault_unseal | bool)))
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
+# 7a. Shamir with vault_unseal=false leaves the node sealed on purpose. Raft
+#     verify and audit need an unsealed node, so skip them and say why.
+# ------------------------------------------------------------------------------
+
+- name: Determine whether Vault is left sealed because vault_unseal is false
+  ansible.builtin.set_fact:
+    __vault_left_sealed: >-
+      {{ vault_seal_type == 'shamir'
+         and not (vault_unseal | bool)
+         and (__vault_status['sealed'] | default(true) | bool) }}
+  tags: init_unseal
+
+- name: Report that Vault is left sealed (vault_unseal is false)
+  ansible.builtin.debug:
+    msg: >-
+      Vault on {{ inventory_hostname }} is sealed and vault_unseal is false.
+      Unseal it manually (vault operator unseal) with the keys saved in
+      {{ vault_init_output_path }}. Raft formation verify and audit device
+      setup were skipped.
+  when: __vault_left_sealed | bool
+  tags: init_unseal
+
+# ------------------------------------------------------------------------------
+# 7b. Resolve and probe the token for the token-gated steps (Raft verify and
+#     audit). vault_admin_token wins over the saved root token. A revoked or
+#     expired token (operators are told to revoke the root token) must not
+#     make every later run hang in retries and fail: skip the token-gated
+#     steps with a warning when Vault rejects the token. Only a definitive
+#     answer counts: right after a multi-node restart there may be no active
+#     node yet and the lookup fails for that reason, so retry until Vault
+#     accepts or rejects the token, and fail when it does neither.
+# ------------------------------------------------------------------------------
+
+- name: Resolve the token for token-gated steps
+  ansible.builtin.set_fact:
+    __vault_api_token: >-
+      {{ vault_admin_token if vault_admin_token | length > 0
+         else (__vault_root_token | default('')) }}
+  no_log: true
+  tags: init_unseal
+
+- name: Look up the token on the bootstrap node
+  ansible.builtin.command: >-
+    {{ vault_bin_path }} token lookup -format=json
+  environment: "{{ __vault_bootstrap_cli_env | combine({'VAULT_TOKEN': __vault_api_token}) }}"
+  delegate_to: "{{ vault_init_bootstrap_node }}"
+  run_once: true
+  register: __vault_token_lookup
+  check_mode: false
+  changed_when: false
+  # failed_when: false keeps the result for the verdict below, which fails
+  # with the CLI error when Vault never gave a definitive answer. stdout holds
+  # the token itself, hence no_log here and stderr only in that failure.
+  failed_when: false
+  until: >-
+    __vault_token_lookup['rc'] == 0
+    or __vault_token_lookup['stderr'] | lower is search('permission denied|bad token|code: 403')
+  retries: 12
+  delay: 5
+  no_log: true
   when:
-    - vault_init | bool or vault_unseal | bool
-    - __vault_unseal_keys is defined or vault_seal_type != 'shamir'
+    - __vault_api_token | length > 0
+    - not (__vault_left_sealed | default(false) | bool)
+  tags: init_unseal
+
+- name: Record whether the token is valid or rejected
+  ansible.builtin.set_fact:
+    __vault_token_valid: "{{ __vault_token_lookup_ran and __vault_token_lookup['rc'] == 0 }}"
+    __vault_token_rejected: >-
+      {{ __vault_token_lookup_ran and __vault_token_lookup['rc'] != 0
+         and __vault_token_lookup['stderr'] | lower is search('permission denied|bad token|code: 403') }}
+  vars:
+    __vault_token_lookup_ran: >-
+      {{ __vault_token_lookup is defined
+         and not (__vault_token_lookup['skipped'] | default(false) | bool) }}
+  run_once: true
+  tags: init_unseal
+
+- name: Fail when the token lookup gave no definitive answer
+  ansible.builtin.fail:
+    msg: >-
+      vault token lookup on {{ vault_init_bootstrap_node }} kept failing for a
+      reason other than an invalid token (rc={{ __vault_token_lookup['rc'] }}),
+      for example no active node after a restart:
+      {{ __vault_token_lookup['stderr'] }}
+  run_once: true
+  when:
+    - __vault_token_lookup is defined
+    - not (__vault_token_lookup['skipped'] | default(false) | bool)
+    - not (__vault_token_valid | bool)
+    - not (__vault_token_rejected | bool)
+  tags: init_unseal
+
+- name: Warn that token-gated steps are skipped
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: the Vault token for day-2 steps
+      ({{ 'vault_admin_token' if vault_admin_token | length > 0 else 'root token from ' ~ vault_init_output_path }})
+      is not valid (token lookup rc={{ __vault_token_lookup['rc'] | default('n/a') }};
+      revoked or expired?). Skipped: Raft formation verify and audit device
+      setup. Set vault_admin_token to a valid token to run them.
+  run_once: true
+  when: __vault_token_rejected | bool
   tags: init_unseal
 
 # ------------------------------------------------------------------------------
 # 8. Raft formation verify (bootstrap node, run_once)
 #    Checks that peer count == vault_raft_peers | length and all are voters.
 #    Autopilot auto-promotes voters after ~10s; retry accordingly.
-#    Runs whenever a root token is resolvable (fresh init OR loaded from file).
-#    no_log: true — VAULT_TOKEN in environment; task output is read-only
+#    Runs whenever a valid token is resolvable (vault_admin_token, or the root
+#    token from a fresh init or the saved init file).
+#    no_log: true - VAULT_TOKEN in environment; task output is read-only
 #    (changed_when: false) so no secrets leak through change reporting.
 # ------------------------------------------------------------------------------
 
 - name: Verify Raft peer formation (bootstrap node)
   ansible.builtin.command: >-
     {{ vault_bin_path }} operator raft list-peers -format=json
-  environment:
-    VAULT_ADDR: "{{ vault_api_addr }}"
-    VAULT_CACERT: "{{ vault_tls_ca_file }}"
-    VAULT_TOKEN: "{{ __vault_root_token | default('') }}"
+  environment: "{{ __vault_bootstrap_cli_env | combine({'VAULT_TOKEN': __vault_api_token}) }}"
   delegate_to: "{{ vault_init_bootstrap_node }}"
   run_once: true
   register: __vault_raft_peers_cmd
+  check_mode: false
   changed_when: false
   # failed_when is intentionally omitted so that Ansible fails the task when
   # retries are exhausted without meeting the until condition. With failed_when:
   # false the task would silently report ok even with 1 peer, causing the assert
   # below to fail with confusing messaging.
+  # A permission error does not heal by waiting: stop retrying on it (the
+  # non-zero rc then fails the task).
   until: >-
+    'permission denied' in __vault_raft_peers_cmd['stderr'] | lower or
     __vault_raft_peers_cmd['rc'] == 0 and
     __vault_raft_peers_cmd['stdout'] | length > 0 and
     ((__vault_raft_peers_cmd['stdout'] | from_json)['data']['config']['servers'] | length) == (vault_raft_peers | length) and
@@ -574,8 +841,8 @@
   delay: 10
   no_log: true
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
+    - not (__vault_left_sealed | default(false) | bool)
   tags: init_unseal
 
 - name: Assert all Raft peers are voters
@@ -591,7 +858,7 @@
     quiet: true
   run_once: true
   when:
-    - __vault_root_token is defined
-    - __vault_root_token | length > 0
+    - __vault_token_valid | default(false) | bool
+    - not (__vault_left_sealed | default(false) | bool)
     - __vault_raft_peers_cmd is defined
   tags: init_unseal

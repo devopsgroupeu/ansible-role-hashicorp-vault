@@ -3,7 +3,7 @@ argument_specs:
   main:
     short_description: Install and configure HashiCorp Vault as a TLS-enabled Raft HA cluster
     description: >
-      Installs HashiCorp Vault (OSS) via package or GPG-verified binary,
+      Installs HashiCorp Vault Community Edition (BUSL 1.1) via package or GPG-verified binary,
       renders a validated vault.hcl (Raft integrated storage, TLS on by default),
       manages idempotent init and unseal (Shamir or auto-unseal), hardens the
       systemd unit, and optionally enables a file audit device.
@@ -15,7 +15,7 @@ argument_specs:
       vault_version:
         type: str
         required: false
-        default: "2.0.3"
+        default: "2.2.2"
         description: Pinned Vault version for reproducible installs.
 
       vault_install_method:
@@ -75,10 +75,19 @@ argument_specs:
         default: true
         description: GPG-verify SHA256SUMS.sig before extracting the binary.
 
+      vault_binary_gpg_fingerprint:
+        type: str
+        required: false
+        default: "C874011F0AB405110D02105534365D9472D7468F"
+        description: >
+          Primary key fingerprint that must have signed SHA256SUMS (binary
+          method, when vault_binary_verify_gpg is true). Defaults to
+          HashiCorp's release signing key. Spaces are ignored.
+
       vault_arch:
         type: str
         required: false
-        default: "{{ {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(ansible_architecture, '') }}"
+        default: "{{ {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(ansible_facts['architecture'], '') }}"
         description: >
           CPU architecture string used in repo and binary download paths.
           amd64/arm64 only; other architectures are rejected by validate.yml.
@@ -142,14 +151,18 @@ argument_specs:
       vault_api_addr:
         type: str
         required: false
-        default: "https://{{ ansible_default_ipv4.address }}:8200"
-        description: Advertised API address (https; used by clients and retry_join).
+        default: "{{ 'https' if vault_tls_enabled | bool else 'http' }}://{{ ansible_facts['default_ipv4']['address'] }}:8200"
+        description: >
+          Advertised API address (used by clients and retry_join). The scheme
+          follows vault_tls_enabled (https when on, http when off).
 
       vault_cluster_addr:
         type: str
         required: false
-        default: "https://{{ ansible_default_ipv4.address }}:8201"
-        description: Advertised cluster address (https; used for Raft replication).
+        default: "https://{{ ansible_facts['default_ipv4']['address'] }}:8201"
+        description: >
+          Advertised cluster address (https; used for Raft replication). The
+          cluster port always uses TLS, even when vault_tls_enabled is false.
 
       vault_ui:
         type: bool
@@ -246,7 +259,18 @@ argument_specs:
         type: str
         required: false
         default: "+825d"
-        description: Certificate validity period (ownca not_after format).
+        description: >
+          Validity of role-generated node certificates (ownca not_after
+          format). They are re-signed when they expire within 30 days.
+
+      vault_tls_ca_validity:
+        type: str
+        required: false
+        default: "+3650d"
+        description: >
+          Validity of the role-generated CA (selfsigned not_after format). The
+          CA is renewed (same key) when it expires within 90 days, and the node
+          certificates are re-signed in the same run.
 
       vault_tls_leader_servername:
         type: str
@@ -267,7 +291,9 @@ argument_specs:
         type: bool
         required: false
         default: true
-        description: Install the role-generated CA into the OS trust store.
+        description: >
+          Install the CA (vault_tls_ca_file) into the OS trust store. Ignored
+          when vault_tls_enabled is false.
 
       # ---- Storage (Raft) ----
       vault_storage:
@@ -292,18 +318,33 @@ argument_specs:
           List of inventory hostnames forming the cluster; used for retry_join
           and to gate init/unseal delegation.
 
+      vault_allow_unreachable_peers:
+        type: bool
+        required: false
+        default: false
+        description: >
+          Continue when an inventory peer in vault_raft_peers cannot be reached
+          to gather its network facts. By default the play stops and names the
+          peer. When true, that peer's retry_join address falls back to its
+          inventory hostname and its IP SAN is dropped, which rewrites vault.hcl
+          and the certificates and restarts Vault on the reachable nodes.
+
       vault_raft_performance_multiplier:
         type: int
         required: false
         default: 1
         description: >
-          Raft performance multiplier. 1 = on-prem LAN; 5 = cloud/WAN.
+          Raft performance multiplier, 1 to 10. 1 = on-prem LAN; 5 = cloud/WAN.
 
       vault_raft_extra_parameters:
         type: dict
         required: false
         default: {}
-        description: Extra key=value pairs injected into the storage "raft" stanza.
+        description: >
+          Extra key=value pairs injected into the storage "raft" stanza. Values
+          must be strings, numbers or booleans, and keys the role renders
+          itself (path, node_id, performance_multiplier, retry_join) are
+          rejected.
 
       # ---- Seal / auto-unseal ----
       vault_seal_type:
@@ -490,8 +531,12 @@ argument_specs:
         required: false
         default: []
         description: >
-          Base64-encoded binary PGP public keys for encrypting unseal shares.
-          Empty = plaintext shares (protect with vault_init_encrypt_output).
+          Base64-encoded binary PGP public keys for encrypting unseal or
+          recovery shares, one per share (count must equal
+          vault_init_key_shares, or vault_init_recovery_shares for
+          auto-unseal). With Shamir, vault_unseal must be false because the
+          role cannot use encrypted shares. Empty = plaintext shares (protect
+          with vault_init_encrypt_output).
 
       vault_init_output_path:
         type: str
@@ -524,6 +569,17 @@ argument_specs:
         required: false
         default: "{{ vault_raft_peers[0] }}"
         description: Stable cluster identifier used in the init output filename.
+
+      vault_admin_token:
+        type: str
+        required: false
+        default: ""
+        no_log: true
+        description: >
+          Optional Vault token for Raft formation verify and audit device
+          setup. Takes precedence over the saved root token, so day-2 runs keep
+          working after the root token is revoked. Empty = use the saved root
+          token; without a valid token these steps are skipped with a warning.
 
       # ---- Telemetry / logging / TTLs / hardening ----
       vault_telemetry_enabled:
@@ -563,6 +619,7 @@ argument_specs:
         type: str
         required: false
         default: "json"
+        choices: [standard, json]
         description: Vault log format; 'json' produces structured logs.
 
       vault_default_lease_ttl:
@@ -603,7 +660,11 @@ argument_specs:
         type: dict
         required: false
         default: {}
-        description: Free-form extra top-level HCL key=value pairs for vault.hcl.
+        description: >
+          Free-form extra top-level HCL key=value pairs for vault.hcl. Values
+          must be strings, numbers or booleans, and keys the role renders
+          itself (for example ui, log_level, storage, listener, seal) are
+          rejected: Vault fails to parse duplicate attributes.
 
       # ---- Audit ----
       vault_audit_enabled:
@@ -629,6 +690,27 @@ argument_specs:
         required: false
         default: {}
         description: Extra options passed to 'vault audit enable' as key=value pairs.
+
+      vault_audit_logrotate_enabled:
+        type: bool
+        required: false
+        default: true
+        description: >
+          Rotate the audit log with logrotate (installs logrotate and renders
+          /etc/logrotate.d/vault-audit, which reloads Vault after rotation).
+
+      vault_audit_logrotate_rotate:
+        type: int
+        required: false
+        default: 14
+        description: Number of rotated audit logs to keep.
+
+      vault_audit_logrotate_frequency:
+        type: str
+        required: false
+        default: "daily"
+        choices: [daily, weekly, monthly, yearly]
+        description: logrotate frequency for the audit log.
 
       # ---- systemd / permissions ----
       vault_systemd_limit_nofile:
@@ -696,6 +778,7 @@ argument_specs:
         type: str
         required: false
         default: "started"
+        choices: [started, stopped, restarted, reloaded]
         description: Desired systemd service state after configuration.
 
       vault_config_only:

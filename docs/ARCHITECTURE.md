@@ -9,7 +9,7 @@ the operational flows for cluster init and unseal.
 
 A three-node Vault Raft HA cluster is the recommended minimum for production.
 One node acts as the active leader; the other two are standbys. Raft replication
-is synchronous — writes are committed once a quorum (n/2 + 1) of nodes has
+is synchronous - writes are committed once a quorum (n/2 + 1) of nodes has
 acknowledged.
 
 ```mermaid
@@ -66,18 +66,18 @@ sequenceDiagram
     participant SN2 as vault2 (standby)
     participant SN3 as vault3 (standby)
 
-    Note over Ctrl,SN3: Phase 1 — Converge (install + config + TLS)
+    Note over Ctrl,SN3: Phase 1 - Converge (install + config + TLS)
     Ctrl->>BN: install Vault, render vault.hcl, start service
     Ctrl->>SN2: install Vault, render vault.hcl, start service
     Ctrl->>SN3: install Vault, render vault.hcl, start service
 
-    Note over Ctrl,BN: Phase 2 — Init (bootstrap node only)
+    Note over Ctrl,BN: Phase 2 - Init (bootstrap node only)
     Ctrl->>BN: vault operator init (run_once + delegate_to)
     BN-->>Ctrl: unseal_keys_b64 + root_token
     Ctrl->>Ctrl: save .vault_init_<cluster_id>.json (mode 0600)
     Ctrl->>Ctrl: ansible-vault encrypt (if vault_init_encrypt_output)
 
-    Note over Ctrl,SN3: Phase 3 — Unseal (all nodes)
+    Note over Ctrl,SN3: Phase 3 - Unseal (all nodes)
     Ctrl->>BN: vault operator unseal (key shares until threshold)
     BN-->>Ctrl: sealed=false, ha_mode=active
     Ctrl->>SN2: vault operator unseal (key shares until threshold)
@@ -85,7 +85,7 @@ sequenceDiagram
     Ctrl->>SN3: vault operator unseal (key shares until threshold)
     SN3-->>Ctrl: sealed=false, ha_mode=standby (joins via retry_join)
 
-    Note over Ctrl,BN: Phase 4 — Audit device (active node only)
+    Note over Ctrl,BN: Phase 4 - Audit device (active node only)
     Ctrl->>BN: vault audit enable file/ (run_once on active)
     BN-->>Ctrl: audit device enabled cluster-wide
 ```
@@ -96,7 +96,7 @@ sequenceDiagram
   on subsequent runs once the cluster is bootstrapped (init is idempotent but
   making the intent explicit avoids unnecessary API calls).
 - Under auto-unseal (`vault_seal_type: transit | awskms | azurekeyvault | gcpckms`),
-  Phase 3 is skipped — the KMS unseals on startup. `vault operator init` returns
+  Phase 3 is skipped - the KMS unseals on startup. `vault operator init` returns
   *recovery keys* (not unseal keys); recovery keys only gate root-token generation
   and rekey.
 - All tasks that handle unseal/recovery keys and the root token run with

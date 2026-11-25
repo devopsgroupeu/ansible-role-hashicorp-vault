@@ -10,7 +10,8 @@
 [![LinkedIn](https://img.shields.io/badge/linkedin-%230077B5.svg?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/company/devopsgroup8/)
 ![HashiCorp Vault](https://img.shields.io/badge/HashiCorp%20Vault-FFEC6E?logo=vault&logoColor=000&style=for-the-badge)
 
-Production-ready Ansible role for installing and configuring **HashiCorp Vault** (OSS)
+Production-ready Ansible role for installing and configuring **HashiCorp Vault**
+Community Edition (BUSL 1.1)
 as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 (Shamir + auto-unseal), systemd hardening, audit devices, and Prometheus telemetry.
 
@@ -22,9 +23,9 @@ as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 - **Collections:** `community.crypto >= 3.2.2`
   Install via: `ansible-galaxy collection install -r requirements.yml`
 - **Target OS:** Ubuntu 24.04 (noble), Debian 12/13 (bookworm/trixie), RHEL/Rocky/Alma 9
-- **Vault version:** 2.0.3 (default; override via `vault_version`)
+- **Vault version:** 2.2.2 (default; override via `vault_version`)
 - **Docker (Molecule):** required for running tests locally
-- **`become: true` at the play level** — the role does not set `become` per-task
+- **`become: true` at the play level** - the role does not set `become` per-task
 
 ---
 
@@ -44,11 +45,11 @@ Or pin a version from Git:
 roles:
   - name: devopsgroupeu.hashicorp-vault
     src: https://github.com/devopsgroupeu/ansible-role-hashicorp-vault.git
-    version: "v1.0.0"
+    version: "vX.Y.Z"   # latest release tag, see GitHub Releases
     scm: git
 ```
 
-### Single-node (dev/test — self-signed TLS, Shamir unseal)
+### Single-node (dev/test - self-signed TLS, Shamir unseal)
 
 ```yaml
 - name: Deploy Vault
@@ -63,7 +64,7 @@ roles:
         vault_init_encrypt_output: false
 ```
 
-### Three-node Raft cluster (production — BYO TLS, Shamir)
+### Three-node Raft cluster (production - BYO TLS, Shamir)
 
 ```yaml
 - name: Deploy Vault cluster
@@ -114,7 +115,7 @@ See `examples/` for all complete playbooks.
 
 ## Role variables
 
-All 107 variables are documented in full in **[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
+All 114 variables are documented in full in **[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
 Every variable is prefixed `vault_`, declared in `defaults/main.yml`, and validated
 by `meta/argument_specs.yml` (1:1 mapping).
 
@@ -122,9 +123,9 @@ Key variables to be aware of:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `vault_version` | `"2.0.3"` | Pin your desired Vault version |
+| `vault_version` | `"2.2.2"` | Pin your desired Vault version |
 | `vault_install_method` | `"package"` | `package` or `binary` |
-| `vault_tls_enabled` | `true` | **TLS on by default** — supply BYO certs or set `vault_tls_generate_certs: true` |
+| `vault_tls_enabled` | `true` | **TLS on by default** - supply BYO certs or set `vault_tls_generate_certs: true` |
 | `vault_tls_generate_certs` | `false` | `true` = self-signed cert (dev/test only) |
 | `vault_tls_leader_servername` | `"vault.cluster.internal"` | Must be a DNS SAN on every node's cert |
 | `vault_seal_type` | `"shamir"` | Change to `transit`/`awskms`/`azurekeyvault`/`gcpckms` for auto-unseal |
@@ -132,6 +133,7 @@ Key variables to be aware of:
 | `vault_init_bootstrap_node` | `vault_raft_peers[0]` | Node where `vault operator init` runs |
 | `vault_init_output_path` | `~/.vault/.vault_init_…json` | Controller-side (outside the repo), mode `0600`; optionally encrypted |
 | `vault_init_encrypt_output` | `true` | Encrypt init JSON with `ansible-vault` |
+| `vault_admin_token` | `""` | Optional token for Raft verify and audit setup after the root token is revoked |
 | `vault_disable_mlock` | `true` | Required for Raft/BoltDB mmap |
 | `vault_manage_swap` | `true` | `swapoff -a` + purge fstab |
 | `vault_config_only` | `false` | `true` = template-only dry-run (skip install/service/init) |
@@ -159,7 +161,7 @@ The init file (`vault_init_output_path`) is saved mode `0600` on the Ansible
 controller, by default under `~/.vault/` (outside any playbook/repo directory)
 so init secrets never land in a consumer's git repository. When
 `vault_init_encrypt_output: true` (the default), the role **fails before writing
-any init material** unless `vault_init_encrypt_password_file` is set — it never
+any init material** unless `vault_init_encrypt_password_file` is set - it never
 writes the root token and unseal/recovery keys in plaintext by accident. Set
 `vault_init_encrypt_output: false` to intentionally store the file unencrypted.
 **Never commit this file**; if you relocate it into a repo, add a `.gitignore`
@@ -169,7 +171,7 @@ multi-cluster overwrites.
 ### Unseal keys vs recovery keys
 
 Under auto-unseal (`vault_seal_type != shamir`), Vault returns **recovery keys**,
-not unseal keys. Recovery keys only gate root-token generation and rekey — they
+not unseal keys. Recovery keys only gate root-token generation and rekey - they
 **cannot unseal** a cluster if the KMS is unavailable. **KMS key deletion =
 permanent, unrecoverable cluster loss.** Enable deletion protection on your KMS key.
 
@@ -210,6 +212,56 @@ cluster-wide config change causes a simultaneous reseal and a brief outage; the
 role re-unseals the nodes later in the same run (using the saved init file). For
 zero-downtime changes in production, serialize the run one node at a time (e.g.
 `serial: 1` on the play, or `--limit` per node) so only one node reseals at a time.
+The role gathers network facts for peers outside the current batch, so
+`retry_join` addresses and certificate SANs stay stable in such runs. Use
+`serial`/`--limit` only for day-2 changes on an existing cluster, never for the
+first bootstrap: the cluster has to be initialized and joined in one full run.
+
+**Degraded cluster.** When an inventory peer is down, its network facts cannot
+be gathered and the play stops with an assert that names it, in a full run and
+in a `--limit` run alike. Without those facts the peer's `retry_join` address
+would fall back to its hostname and its IP SAN would be dropped, which rewrites
+`vault.hcl` and the certificates and restarts Vault on the reachable nodes. To
+converge or re-unseal the surviving nodes anyway (for example after they
+rebooted sealed), set `vault_allow_unreachable_peers: true` and limit the run
+to them: the role takes that fallback, restarts and re-unseals them. The
+bootstrap node (`vault_init_bootstrap_node`) must be among them, because the
+role delegates init, Raft verify and audit to it. Once the peer is back, run
+the play again without the variable so the addresses and SANs return to the
+peer IP.
+
+A `vault_version` change (package or binary install) also notifies the restart
+handler, so the new version runs right away and the role re-unseals the node in
+the same run. For an HA upgrade, follow the HashiCorp HA upgrade order: run the
+play with `serial: 1`, standby nodes first and the active node last, so only one
+node is down and sealed at a time.
+
+---
+
+## Upgrading Vault
+
+The role pins `vault_version` (default `2.2.2`). When you do not pin it
+yourself, a role upgrade can change the Vault version: the next run installs it,
+restarts Vault and re-unseals it (see [HA restart behaviour](#ha-restart-behaviour)
+for the HA order). Read the HashiCorp changelog for every minor version you
+cross. Notes for 2.0.3 to 2.2.2:
+
+- **2.0.4:** duplicate HCL attributes always fail to parse, and the
+  `VAULT_ALLOW_PENDING_REMOVAL_DUPLICATE_HCL_ATTRIBUTES` escape hatch is gone.
+  The role rejects `vault_extra_config` / `vault_raft_extra_parameters` keys
+  that it already renders.
+- **2.1.2 and 2.2.0:** ACL rule paths for named resources are matched
+  lowercased. Existing mixed-case deny rules **fail open (become allow-all)
+  after the upgrade until they are rewritten with lowercase names.** Audit your
+  policies before upgrading.
+- **2.2.0:** `sys/rekey` and `sys/generate-root` require authentication by
+  default (opt out with `enable_unauthenticated_access`). The role uses
+  neither.
+- **2.2.0:** Raft rejects `performance_multiplier <= 0`. The role default is
+  `1`, and the role validates the range 1 to 10.
+
+The 2.0 line reached end of life on 2026-08-31 and misses ACL security fixes
+from 2.0.4, 2.1.2, 2.2.0, 2.2.1 and 2.2.2.
 
 ---
 
@@ -225,13 +277,27 @@ molecule test -s render
 # Full single-node install + init + unseal + audit
 molecule test -s default
 
-# Three-node Raft HA cluster (heavy — run manually)
+# Failure paths and fail-closed guards (init file, encryption, PGP, wait gates)
+molecule test -s negative
+
+# Binary install, TLS disabled, package upgrade
+molecule test -s binary
+molecule test -s tls-disabled
+molecule test -s upgrade
+
+# Three-node Raft HA cluster (heavy)
 molecule test -s raft-ha
 ```
 
-The CI pipeline (`ci.yml`) runs `render` and `default` on `debian12`, `ubuntu2404`,
-and `rockylinux9` on every push/PR. The `raft-ha` scenario is manual
-(workflow_dispatch) due to resource requirements.
+The CI pipeline (`ci.yml`) runs on every push/PR: lint on ansible-core 2.20,
+2.21 and 2.22, `render` on `debian12`, `ubuntu2404`, `debian13` and
+`rockylinux9` (plus ansible-core 2.20 and 2.22 legs on `debian12`), `default`
+on `debian12`, `ubuntu2404` and `debian13`, `binary` on `debian12` and
+`ubuntu2404`, and `negative`, `tls-disabled` and `upgrade` on `debian12`. The
+`raft-ha` scenario (with idempotence, a `--limit` re-run, a restart of every
+node and a stopped peer) runs on pull requests to `main` and on demand via
+workflow_dispatch. EL9 is rendered in CI only; live EL9 installs are validated
+on real hosts.
 
 ---
 
@@ -239,10 +305,10 @@ and `rockylinux9` on every push/PR. The `raft-ha` scenario is manual
 
 ```
 ansible-role-hashicorp-vault/
-├── defaults/main.yml              # 107 public variables
+├── defaults/main.yml              # 114 public variables
 ├── vars/main.yml                  # OS-family maps (internal)
 ├── meta/main.yml                  # Galaxy metadata
-├── meta/argument_specs.yml        # 1:1 with defaults (107 entries)
+├── meta/argument_specs.yml        # 1:1 with defaults (114 entries)
 ├── tasks/
 │   ├── main.yml                   # orchestrator
 │   ├── validate.yml               # cross-var assertions
@@ -259,7 +325,7 @@ ansible-role-hashicorp-vault/
 │   ├── vault.hcl.j2
 │   ├── vault.env.j2
 │   └── vault.service.j2
-├── molecule/{default,render,raft-ha}/
+├── molecule/{default,render,raft-ha,negative,binary,tls-disabled,upgrade}/
 ├── examples/{single_node.yml,raft_cluster.yml,autounseal_transit.yml}
 │   └── inventory/vault_cluster.yml
 ├── docs/{ARCHITECTURE.md,CONFIGURATION.md,INTEGRATION.md,TROUBLESHOOTING.md}
@@ -270,11 +336,11 @@ ansible-role-hashicorp-vault/
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+We welcome contributions! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md) to get started.
 
 ## Code of Conduct
 
-Read our [Code of Conduct](CODE_OF_CONDUCT.md).
+Read our [Code of Conduct](.github/CODE_OF_CONDUCT.md).
 
 ## Changelog
 

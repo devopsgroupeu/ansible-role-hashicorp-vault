@@ -1,0 +1,21 @@
+---
+# Remove the controller-side init file (and any backups of it) so the next run
+# can initialize a fresh cluster; the role refuses to overwrite an existing one.
+- name: Cleanup upgrade scenario controller files
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Find controller init files
+      ansible.builtin.find:
+        paths: /tmp
+        patterns: ".vault_init_molecule_upgrade.json*"
+        hidden: true
+      register: __cleanup_init_files
+
+    - name: Remove controller init files
+      ansible.builtin.file:
+        path: "{{ item['path'] }}"
+        state: absent
+      loop: "{{ __cleanup_init_files['files'] }}"
+      loop_control:
+        label: "{{ item['path'] }}"
