@@ -1,5 +1,5 @@
 # Python requirements for testing
-ansible-core>=2.19,<2.22
+ansible-core>=2.22.0,<2.23
 molecule>=25.0.0,<27.0.0
 molecule-plugins[docker]>=23.5.0,<27
 ansible-lint>=26.11,<27
