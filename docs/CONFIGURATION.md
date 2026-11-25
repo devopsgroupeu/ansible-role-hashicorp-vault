@@ -74,7 +74,7 @@ is prefixed `vault_`.
 TLS is **on by default** (`vault_tls_enabled: true`). Two modes:
 
 - **BYO (production default, `vault_tls_generate_certs: false`):** supply cert/key/CA at the configured paths before running the role.
-- **Generated (dev/test, `vault_tls_generate_certs: true`):** role builds a CA + per-node cert via `community.crypto` ownca. **The CA private key is replicated to every node in the play — use BYO certs in production.**
+- **Generated (dev/test, `vault_tls_generate_certs: true`):** role builds a CA + per-node cert via `community.crypto` ownca. **The CA private key is replicated to every node in the play - use BYO certs in production.**
 
 > **SAN requirement:** `vault_tls_leader_servername` must be a **DNS SAN** on every
 > node's certificate (CN matching was removed in Go 1.17). Mismatch = explicit x509
@@ -110,7 +110,7 @@ Only Raft integrated storage is supported by this role.
 | Variable | Default | Description |
 |---|---|---|
 | `vault_storage` | `"raft"` | Storage backend. Only `raft` is supported. |
-| `vault_raft_node_id` | `"{{ inventory_hostname }}"` | Deterministic Raft node ID. **Never use a random value** — random IDs cause split-brain on restart. |
+| `vault_raft_node_id` | `"{{ inventory_hostname }}"` | Deterministic Raft node ID. **Never use a random value** - random IDs cause split-brain on restart. |
 | `vault_raft_peers` | `groups['vault'] \| default([inventory_hostname])` | List of inventory hostnames forming the cluster. Used to render `retry_join` blocks and to gate init/unseal delegation. |
 | `vault_allow_unreachable_peers` | `false` | Continue when an inventory peer in `vault_raft_peers` cannot be reached to gather its network facts. By default the play stops with an assert that names the peer. When `true`, that peer's `retry_join` address falls back to its inventory hostname and its IP SAN is dropped, which rewrites `vault.hcl` and the role-generated certificates and restarts Vault on the reachable nodes. Use it only to converge or re-unseal the surviving nodes of a degraded cluster; see [HA restart behaviour](../README.md#ha-restart-behaviour). |
 | `vault_raft_performance_multiplier` | `1` | Raft performance multiplier, `1` to `10` (validated). `1` = on-prem LAN tight timing (recommended). Use `5` for cloud/WAN deployments with higher latency. |
@@ -122,11 +122,11 @@ Only Raft integrated storage is supported by this role.
 
 Default is Shamir (no `seal` stanza in `vault.hcl`). Set `vault_seal_type` to
 configure auto-unseal. **Sensitive credentials (tokens, keys) are delivered via
-`vault.env` EnvironmentFile — never written into `vault.hcl`.**
+`vault.env` EnvironmentFile - never written into `vault.hcl`.**
 
 > **Recovery keys vs unseal keys:** with auto-unseal, `vault operator init` returns
 > *recovery keys*, not unseal keys. Recovery keys only gate root-token generation and
-> rekey — they cannot unseal the cluster if the KMS is unavailable. KMS key deletion
+> rekey - they cannot unseal the cluster if the KMS is unavailable. KMS key deletion
 > or permanent KMS unavailability = **permanent cluster loss**.
 
 ### Common

@@ -1,6 +1,6 @@
 ---
 # ============================================================================
-# Variable validation — runs at start of every play (tag: always)
+# Variable validation - runs at start of every play (tag: always)
 # ============================================================================
 
 - name: Validate vault_install_method choice

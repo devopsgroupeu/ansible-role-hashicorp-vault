@@ -1,7 +1,7 @@
 ---
 # Prepare all three raft-ha containers before the role runs.
 # Bootstrap Python so Ansible can manage the nodes; no Vault-specific setup
-# here — the role handles everything from install through init/unseal.
+# here - the role handles everything from install through init/unseal.
 
 - name: Prepare raft-ha containers
   hosts: all

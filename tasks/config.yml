@@ -129,7 +129,7 @@
   tags: config
 
 # ==============================================================================
-# vault.env — must exist before vault.hcl or the systemd unit fails to start.
+# vault.env - must exist before vault.hcl or the systemd unit fails to start.
 # Rendered first so daemon-reload picks it up correctly.
 # ==============================================================================
 

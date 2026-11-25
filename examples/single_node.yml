@@ -1,5 +1,5 @@
 ---
-# Single-node Vault deployment — dev/test with role-generated self-signed TLS.
+# Single-node Vault deployment - dev/test with role-generated self-signed TLS.
 #
 # Inventory (examples/inventory/vault_cluster.yml or equivalent):
 #   all:

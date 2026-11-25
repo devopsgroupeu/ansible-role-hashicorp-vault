@@ -1,5 +1,5 @@
 ---
-# raft-ha scenario — 3-node Raft integrated-storage cluster.
+# raft-ha scenario - 3-node Raft integrated-storage cluster.
 #
 # All three platforms share a named Docker network ('vault-raft') so that
 # container hostnames resolve via Docker's embedded DNS. The network is declared

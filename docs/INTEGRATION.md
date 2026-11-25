@@ -40,7 +40,7 @@ ansible-galaxy role install -r requirements.yml
 ### From Git source (pre-publish / pinned commit)
 
 ```yaml
-# requirements.yml — git source
+# requirements.yml - git source
 roles:
   - name: devopsgroupeu.hashicorp-vault
     src: https://github.com/devopsgroupeu/ansible-role-hashicorp-vault.git

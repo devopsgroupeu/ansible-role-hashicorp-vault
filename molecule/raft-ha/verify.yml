@@ -224,7 +224,7 @@
         VAULT_CACERT: "{{ __verify_vault_tls_ca }}"
       register: __verify_follower_status_cmd
       changed_when: false
-      # rc=2 = sealed; rc=0 = active or standby — both are acceptable here
+      # rc=2 = sealed; rc=0 = active or standby - both are acceptable here
       # (if the node joined but is a standby, rc=0; the assert below checks type)
       failed_when: __verify_follower_status_cmd['rc'] not in [0, 2]
 

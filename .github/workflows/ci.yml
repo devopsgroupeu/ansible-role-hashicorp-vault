@@ -87,7 +87,7 @@ jobs:
       # containers have known sudo/PAM quirks). raft-ha is a separate job.
       matrix:
         include:
-          # render scenario — offline template validation
+          # render scenario - offline template validation
           - scenario: render
             distro: debian12
           - scenario: render
@@ -104,7 +104,7 @@ jobs:
             distro: debian12
             ansible-core: "2.22"
             python: "3.13"
-          # default scenario — full install + init + unseal + audit
+          # default scenario - full install + init + unseal + audit
           - scenario: default
             distro: debian12
           - scenario: default

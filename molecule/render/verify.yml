@@ -1,6 +1,6 @@
 ---
 # Verify rendered Vault configuration files without starting Vault.
-# All checks use slurp + assert — no service interaction required.
+# All checks use slurp + assert - no service interaction required.
 
 - name: Verify rendered Vault config
   hosts: all
@@ -100,7 +100,7 @@
     - name: Assert vault.env is not empty
       ansible.builtin.assert:
         that: (vault_env_raw['content'] | b64decode | length) > 0
-        fail_msg: "vault.env is empty — it must always contain at least a header comment"
+        fail_msg: "vault.env is empty - it must always contain at least a header comment"
 
     - name: Assert VAULT_ENABLE_FILE_PERMISSIONS_CHECK is in vault.env
       ansible.builtin.assert:
@@ -354,7 +354,7 @@
           vault.hcl missing top-level vault_extra_config key 'pid_file'.
 
 # ---------------------------------------------------------------------------
-# Variant: verify TLS-disabled path — tls_byo.yml must NOT run when
+# Variant: verify TLS-disabled path - tls_byo.yml must NOT run when
 # vault_tls_enabled: false (regression guard for the tasks/tls.yml fix).
 # ---------------------------------------------------------------------------
 

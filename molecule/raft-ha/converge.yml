@@ -19,14 +19,14 @@
 #   - Shamir unseal runs on all nodes (each needs the key; init_unseal.yml handles
 #     distributing the unseal key from the controller to every sealed node).
 #   - vault_init_key_shares/threshold=1 for test simplicity.
-#   - vault_init_encrypt_output=false — no ansible-vault password available unattended.
+#   - vault_init_encrypt_output=false - no ansible-vault password available unattended.
 
 - name: Converge raft-ha
   hosts: all
   become: true
   gather_facts: true
   vars:
-    # Cluster peers — all three container hostnames (Docker DNS resolves these).
+    # Cluster peers - all three container hostnames (Docker DNS resolves these).
     vault_raft_peers:
       - vault1
       - vault2

@@ -1,6 +1,6 @@
 ---
 # Prepare the container before the role runs.
-# Install Python and gather facts; no Vault-specific setup here — the role
+# Install Python and gather facts; no Vault-specific setup here - the role
 # installs Vault itself via the package method.
 
 - name: Prepare default container

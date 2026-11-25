@@ -24,7 +24,7 @@
     vault_init_key_shares: 1
     vault_init_key_threshold: 1
 
-    # Do not encrypt the init output — ansible-vault is not available
+    # Do not encrypt the init output - ansible-vault is not available
     # unattended in the Molecule environment without a vault password file.
     vault_init_encrypt_output: false
 

@@ -7,7 +7,7 @@ Common issues and resolutions for the `devopsgroupeu.hashicorp-vault` role.
 ## Table of Contents
 
 - [Sealed cluster recovery](#sealed-cluster-recovery)
-- [Auto-unseal: recovery keys cannot unseal — KMS down](#auto-unseal-recovery-keys-cannot-unseal--kms-down)
+- [Auto-unseal: recovery keys cannot unseal - KMS down](#auto-unseal-recovery-keys-cannot-unseal--kms-down)
 - [Transit auto-unseal: token expired or revoked](#transit-auto-unseal-token-expired-or-revoked)
 - [TLS / x509 / SAN errors](#tls--x509--san-errors)
 - [mlock and swap](#mlock-and-swap)
@@ -51,7 +51,7 @@ For production, consider Transit auto-unseal to eliminate manual unseal on resta
 
 ---
 
-## Auto-unseal: recovery keys cannot unseal — KMS down
+## Auto-unseal: recovery keys cannot unseal - KMS down
 
 **This is a critical operational constraint. Read carefully.**
 
@@ -70,7 +70,7 @@ With auto-unseal (`vault_seal_type: transit|awskms|azurekeyvault|gcpckms`), Vaul
 
 **Mitigations:**
 - Protect the KMS key with deletion protection / soft-delete where available.
-- For AWS KMS: enable key deletion waiting period (7–30 days).
+- For AWS KMS: enable key deletion waiting period (7-30 days).
 - For Azure Key Vault: enable soft-delete and purge protection.
 - For GCP Cloud KMS: key-version destruction is scheduled (default 24-hour delay
   before permanent deletion). Increase the scheduled duration to at least 30 days.
@@ -78,14 +78,14 @@ With auto-unseal (`vault_seal_type: transit|awskms|azurekeyvault|gcpckms`), Vaul
   policy to prevent accidental key destruction. Monitor all KMS operations with
   Cloud Audit Logs to receive early warning of key state changes.
   **Recovery keys cannot reconstruct the encryption key if the Cloud KMS key is
-  destroyed — this is permanent, unrecoverable cluster loss.**
+  destroyed - this is permanent, unrecoverable cluster loss.**
 - For Transit (Vault-to-Vault): keep the unsealer Vault cluster healthy; back up its
   storage.
 - Test your KMS recovery procedure before it is needed in production.
 
 **If the KMS is temporarily unavailable** and all Vault nodes restart, the cluster
 is sealed and cannot be unsealed until the KMS is restored. Vault nodes are
-**read-only** while sealed — no writes or new leases.
+**read-only** while sealed - no writes or new leases.
 
 ---
 
@@ -224,7 +224,7 @@ immediately after start can cause instability.
 **Cause:** Common causes:
 1. `retry_join` cannot resolve the peer hostname or IP.
 2. TLS SAN mismatch on `leader_tls_servername`.
-3. Nodes started sequentially with long gaps — `retry_join` retries internally but
+3. Nodes started sequentially with long gaps - `retry_join` retries internally but
    may time out if the bootstrap node is not yet ready.
 
 **Diagnosis:**
@@ -312,7 +312,7 @@ sure the init output directory or its parent is writable. If an earlier run
 left a plaintext init file behind, the next run with a valid password file
 encrypts it.
 
-Regardless of the encryption setting, **never commit the init file** — it contains
+Regardless of the encryption setting, **never commit the init file** - it contains
 unseal keys (Shamir) or recovery keys plus the initial root token.
 
 ---

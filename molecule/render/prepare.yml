@@ -54,7 +54,7 @@
 
     - name: Create placeholder TLS cert file
       ansible.builtin.copy:
-        content: "# placeholder — replaced by tls.yml in full install\n"
+        content: "# placeholder - replaced by tls.yml in full install\n"
         dest: /opt/vault/tls/vault-cert.pem
         owner: root
         group: root
@@ -62,7 +62,7 @@
 
     - name: Create placeholder TLS key file
       ansible.builtin.copy:
-        content: "# placeholder — replaced by tls.yml in full install\n"
+        content: "# placeholder - replaced by tls.yml in full install\n"
         dest: /opt/vault/tls/vault-key.pem
         owner: root
         group: vault
@@ -70,7 +70,7 @@
 
     - name: Create placeholder CA file
       ansible.builtin.copy:
-        content: "# placeholder — replaced by tls.yml in full install\n"
+        content: "# placeholder - replaced by tls.yml in full install\n"
         dest: /opt/vault/tls/vault-ca.pem
         owner: root
         group: root

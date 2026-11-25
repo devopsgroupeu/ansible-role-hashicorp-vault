@@ -26,5 +26,5 @@ __pycache__/
 # Logs
 *.log
 
-# Init output (contains unseal keys — never commit)
+# Init output (contains unseal keys - never commit)
 .vault_init_*.json

@@ -3,7 +3,7 @@
 # TLS: generate (community.crypto ownca) or validate BYO + OS trust store
 # ==============================================================================
 
-# Dispatch: generated certs vs. BYO — both branches are gated on vault_tls_enabled.
+# Dispatch: generated certs vs. BYO - both branches are gated on vault_tls_enabled.
 # Without the outer guard, tls_byo.yml would assert cert/key/CA existence even
 # when TLS is disabled (vault_tls_enabled: false), causing a hard false failure.
 - name: Generate TLS certificates via community.crypto

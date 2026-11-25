@@ -25,7 +25,7 @@ as a TLS-enabled, Raft integrated-storage HA cluster with idempotent init/unseal
 - **Target OS:** Ubuntu 24.04 (noble), Debian 12/13 (bookworm/trixie), RHEL/Rocky/Alma 9
 - **Vault version:** 2.2.2 (default; override via `vault_version`)
 - **Docker (Molecule):** required for running tests locally
-- **`become: true` at the play level** — the role does not set `become` per-task
+- **`become: true` at the play level** - the role does not set `become` per-task
 
 ---
 
@@ -49,7 +49,7 @@ roles:
     scm: git
 ```
 
-### Single-node (dev/test — self-signed TLS, Shamir unseal)
+### Single-node (dev/test - self-signed TLS, Shamir unseal)
 
 ```yaml
 - name: Deploy Vault
@@ -64,7 +64,7 @@ roles:
         vault_init_encrypt_output: false
 ```
 
-### Three-node Raft cluster (production — BYO TLS, Shamir)
+### Three-node Raft cluster (production - BYO TLS, Shamir)
 
 ```yaml
 - name: Deploy Vault cluster
@@ -125,7 +125,7 @@ Key variables to be aware of:
 |---|---|---|
 | `vault_version` | `"2.2.2"` | Pin your desired Vault version |
 | `vault_install_method` | `"package"` | `package` or `binary` |
-| `vault_tls_enabled` | `true` | **TLS on by default** — supply BYO certs or set `vault_tls_generate_certs: true` |
+| `vault_tls_enabled` | `true` | **TLS on by default** - supply BYO certs or set `vault_tls_generate_certs: true` |
 | `vault_tls_generate_certs` | `false` | `true` = self-signed cert (dev/test only) |
 | `vault_tls_leader_servername` | `"vault.cluster.internal"` | Must be a DNS SAN on every node's cert |
 | `vault_seal_type` | `"shamir"` | Change to `transit`/`awskms`/`azurekeyvault`/`gcpckms` for auto-unseal |
@@ -161,7 +161,7 @@ The init file (`vault_init_output_path`) is saved mode `0600` on the Ansible
 controller, by default under `~/.vault/` (outside any playbook/repo directory)
 so init secrets never land in a consumer's git repository. When
 `vault_init_encrypt_output: true` (the default), the role **fails before writing
-any init material** unless `vault_init_encrypt_password_file` is set — it never
+any init material** unless `vault_init_encrypt_password_file` is set - it never
 writes the root token and unseal/recovery keys in plaintext by accident. Set
 `vault_init_encrypt_output: false` to intentionally store the file unencrypted.
 **Never commit this file**; if you relocate it into a repo, add a `.gitignore`
@@ -171,7 +171,7 @@ multi-cluster overwrites.
 ### Unseal keys vs recovery keys
 
 Under auto-unseal (`vault_seal_type != shamir`), Vault returns **recovery keys**,
-not unseal keys. Recovery keys only gate root-token generation and rekey — they
+not unseal keys. Recovery keys only gate root-token generation and rekey - they
 **cannot unseal** a cluster if the KMS is unavailable. **KMS key deletion =
 permanent, unrecoverable cluster loss.** Enable deletion protection on your KMS key.
 

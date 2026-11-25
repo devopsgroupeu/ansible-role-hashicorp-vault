@@ -49,8 +49,8 @@
 #    and the enable below run ONCE on the active/bootstrap node. Standby
 #    followers reject writes (and would redirect reads), so delegating to the
 #    bootstrap node is both correct and avoids per-follower failures.
-#    changed_when: false — read-only operation.
-#    no_log: true — VAULT_TOKEN in environment.
+#    changed_when: false - read-only operation.
+#    no_log: true - VAULT_TOKEN in environment.
 # ------------------------------------------------------------------------------
 
 - name: List currently enabled audit devices
@@ -91,7 +91,7 @@
 
 # ------------------------------------------------------------------------------
 # 3. Enable the file audit device when not already present at vault_audit_path.
-#    no_log: true — VAULT_TOKEN in environment.
+#    no_log: true - VAULT_TOKEN in environment.
 # ------------------------------------------------------------------------------
 
 - name: Enable file audit device
